@@ -371,12 +371,6 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/OrderList"
-        "202":
-          description: "Payment pending; the reconciler settles it"
-          content:
-            application/json:
-              schema:
-                "$ref": "#/components/schemas/PlacedOrder"
         "400":
           "$ref": "#/components/responses/Error"
         "401":

@@ -1,0 +1,23 @@
+$kind: http-request
+description: 'Status form: ACTIVE → REMOVED. Placed orders are still fulfilled; open alerts close.'
+method: PATCH
+url: '{{baseUrl}}/admin/products/:id'
+headers:
+- key: Content-Type
+  value: application/json
+pathVariables:
+- key: id
+  value: '{{adminProductId}}'
+body:
+  type: json
+  content: |-
+    {
+      "status": "REMOVED",
+      "removalNote": "Discontinued by the supplier."
+    }
+scripts:
+- type: afterResponse
+  code: |-
+    pm.test('Status is 2xx', () => pm.expect(pm.response.code).to.be.within(200, 299));
+  language: text/javascript
+order: 9000

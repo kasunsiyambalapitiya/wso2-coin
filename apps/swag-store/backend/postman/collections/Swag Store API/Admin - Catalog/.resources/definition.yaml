@@ -1,0 +1,3 @@
+$kind: collection
+description: Catalog Manager role (AUTH_CATALOG_MANAGER_GROUPS). Creates, publishes and stocks the product the shopper folders buy.
+order: 3000

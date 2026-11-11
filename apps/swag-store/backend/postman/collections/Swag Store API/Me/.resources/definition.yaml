@@ -1,0 +1,3 @@
+$kind: collection
+description: The signed-in user and their wallets.
+order: 2000

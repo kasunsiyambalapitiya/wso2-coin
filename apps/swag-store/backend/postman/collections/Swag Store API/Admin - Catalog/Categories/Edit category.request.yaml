@@ -1,0 +1,22 @@
+$kind: http-request
+method: PATCH
+url: '{{baseUrl}}/admin/categories/:id'
+headers:
+- key: Content-Type
+  value: application/json
+pathVariables:
+- key: id
+  value: '{{newCategoryId}}'
+body:
+  type: json
+  content: |-
+    {
+      "name": "Drinkware & Bottles",
+      "sort": 65
+    }
+scripts:
+- type: afterResponse
+  code: |-
+    pm.test('Status is 2xx', () => pm.expect(pm.response.code).to.be.within(200, 299));
+  language: text/javascript
+order: 4000

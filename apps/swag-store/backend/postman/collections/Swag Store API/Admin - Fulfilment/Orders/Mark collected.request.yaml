@@ -1,0 +1,23 @@
+$kind: http-request
+description: READY_FOR_PICKUP → COLLECTED. idChecked must be true.
+method: PATCH
+url: '{{baseUrl}}/admin/orders/:orderNo'
+headers:
+- key: Content-Type
+  value: application/json
+pathVariables:
+- key: orderNo
+  value: '{{orderNo}}'
+body:
+  type: json
+  content: |-
+    {
+      "status": "COLLECTED",
+      "idChecked": true
+    }
+scripts:
+- type: afterResponse
+  code: |-
+    pm.test('Status is 2xx', () => pm.expect(pm.response.code).to.be.within(200, 299));
+  language: text/javascript
+order: 5000

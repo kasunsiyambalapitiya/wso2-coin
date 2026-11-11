@@ -1,0 +1,10 @@
+$kind: http-request
+description: Every office, with the HR location mapping.
+method: GET
+url: '{{baseUrl}}/admin/pickup-offices'
+scripts:
+- type: afterResponse
+  code: |-
+    pm.test('Status is 2xx', () => pm.expect(pm.response.code).to.be.within(200, 299));
+  language: text/javascript
+order: 1000

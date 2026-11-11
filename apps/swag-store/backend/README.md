@@ -66,6 +66,23 @@ The token needs `email`, `userid` and (for admin) `groups` claims. With
 `AUTH_TOKEN_VALIDATOR_ENABLED=false` any JWT shape is decoded without a signature check; startup refuses
 that unless every upstream is loopback.
 
+### Postman
+
+`postman/collections/Swag Store API` is a Postman v3 collection that covers every route (51 requests).
+Use it with the `Swag Store local` environment in `postman/environments`. With `mintLocalToken=true` and
+an empty `jwtAssertion`, the collection builds an unsigned token from `userEmail`, `userId` and
+`userGroups`, so it works only against a store started with `AUTH_TOKEN_VALIDATOR_ENABLED=false`.
+The folders are in end-to-end order: the Catalog Manager creates, publishes and stocks a product, the
+shopper buys it, and Fulfilment Ops hands it over. Responses fill the ids the next requests need, so a
+full run passes on a freshly seeded database (with the fakes) and can be repeated.
+
+```bash
+postman collection run "postman/collections/Swag Store API" -e "postman/environments/Swag Store local.environment.yaml"
+postman collection lint "postman/collections/Swag Store API"
+```
+
+When a route changes, update `openapi.yaml` and the matching request file.
+
 | Command | What it does |
 |---|---|
 | `make test` | `go vet` + unit tests with `-race`. No services needed |

@@ -1,0 +1,41 @@
+$kind: http-request
+description: Replaces the options and regenerates the variant matrix. Existing SKUs are kept.
+method: PUT
+url: '{{baseUrl}}/admin/products/:id/options'
+headers:
+- key: Content-Type
+  value: application/json
+pathVariables:
+- key: id
+  value: '{{adminProductId}}'
+body:
+  type: json
+  content: |-
+    {
+      "options": [
+        {
+          "name": "Colour",
+          "values": [
+            {
+              "value": "Black",
+              "swatchHex": "#000000"
+            },
+            {
+              "value": "Orange",
+              "swatchHex": "#FF7300"
+            }
+          ]
+        }
+      ]
+    }
+scripts:
+- type: afterResponse
+  code: |-
+    pm.test('Status is 2xx', () => pm.expect(pm.response.code).to.be.within(200, 299));
+    if (pm.response.code < 300) {
+      const json = pm.response.json();
+      const value = ((json.variants || []).find((v) => v.active) || {}).id;
+      if (value) { pm.collectionVariables.set('adminVariantId', value); }
+    }
+  language: text/javascript
+order: 5000
