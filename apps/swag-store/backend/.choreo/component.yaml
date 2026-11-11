@@ -1,0 +1,12 @@
+schemaVersion: 1.2
+
+endpoints:
+  - name: swag-store-api
+    displayName: Swag Store API
+    service:
+      basePath: /
+      port: 8080
+    type: REST
+    networkVisibilities:
+      - Public # One WSO2 calls it through the gateway
+    schemaFilePath: openapi.yaml

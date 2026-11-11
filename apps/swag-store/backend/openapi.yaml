@@ -1,0 +1,2323 @@
+openapi: "3.0.3"
+info:
+  title: "Swag Store API"
+  version: "1.0.0"
+  description: "WSO2 Swag Store backend: catalog, cart, coin checkout, office pickup, stock alerts and admin. The Choreo gateway validates the caller's token and passes it as x-jwt-assertion. Errors are {message, errorCode}; clients branch on errorCode only."
+servers:
+  - url: "/"
+security:
+  - jwtAssertion: []
+paths:
+  /health:
+    get:
+      summary: "Liveness"
+      security: []
+      responses:
+        "200":
+          description: "The process is up"
+  /health/dependencies:
+    get:
+      summary: "Dependency health (cached 10 s)"
+      security: []
+      responses:
+        "200":
+          description: "Every dependency is ok or not configured"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/DependencyHealth"
+        "503":
+          description: "A dependency failed"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/DependencyHealth"
+  /users/me:
+    get:
+      summary: "The signed-in user, portal roles and HR status"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Me"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+  /wallets:
+    get:
+      summary: "The caller's wallets, default first. Never cached"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "array"
+                items:
+                  "$ref": "#/components/schemas/Wallet"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "503":
+          "$ref": "#/components/responses/Error"
+  /categories:
+    get:
+      summary: "Categories with active products"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "array"
+                items:
+                  "$ref": "#/components/schemas/Category"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+  /products:
+    get:
+      summary: "Active products"
+      parameters:
+        - name: "q"
+          in: "query"
+          schema:
+            type: "string"
+        - name: "category"
+          in: "query"
+          schema:
+            type: "string"
+          description: "Category slug"
+        - name: "sort"
+          in: "query"
+          schema:
+            type: "string"
+            enum:
+              - "popular"
+              - "price_asc"
+              - "price_desc"
+              - "newest"
+        - name: "inStock"
+          in: "query"
+          schema:
+            type: "boolean"
+        - name: "limit"
+          in: "query"
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: "offset"
+          in: "query"
+          schema:
+            type: "integer"
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ProductList"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+  /products/{slug}:
+    get:
+      summary: "One product. A removed product answers 200 with status REMOVED and alternatives"
+      parameters:
+        - name: "slug"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ProductDetail"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+  /cart:
+    get:
+      summary: "The caller's cart with live prices and line states"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Cart"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+  /cart/summary:
+    get:
+      summary: "Item count for the top-bar badge"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/CartSummary"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+  /cart/lines:
+    post:
+      summary: "Add a variant (merges into an existing line)"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/CartLineInput"
+      responses:
+        "201":
+          description: "Created"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Created"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+        "409":
+          "$ref": "#/components/responses/Error"
+        "413":
+          "$ref": "#/components/responses/Error"
+        "429":
+          "$ref": "#/components/responses/Error"
+  /cart/lines/{id}:
+    patch:
+      summary: "Change a line's quantity"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/CartQuantity"
+      responses:
+        "204":
+          description: "No content"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+        "429":
+          "$ref": "#/components/responses/Error"
+    delete:
+      summary: "Remove a line"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "204":
+          description: "No content"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+        "429":
+          "$ref": "#/components/responses/Error"
+  /pickup-offices:
+    get:
+      summary: "Active pickup offices and the caller's default"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OfficeList"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+  /quotes:
+    post:
+      summary: "Price the cart for an office and wallet. Nothing is stored"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/CheckoutInput"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Quote"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "413":
+          "$ref": "#/components/responses/Error"
+        "503":
+          "$ref": "#/components/responses/Error"
+  /orders:
+    post:
+      summary: "Place an order and pay with coins. Header Idempotency-Key (UUID) is required"
+      parameters:
+        - name: "Idempotency-Key"
+          in: "header"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/CheckoutInput"
+      responses:
+        "201":
+          description: "Created"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/PlacedOrder"
+        "202":
+          description: "Payment pending; the reconciler settles it"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/PlacedOrder"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "402":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "409":
+          "$ref": "#/components/responses/Error"
+        "413":
+          "$ref": "#/components/responses/Error"
+        "429":
+          "$ref": "#/components/responses/Error"
+        "503":
+          "$ref": "#/components/responses/Error"
+    get:
+      summary: "The caller's orders, newest first"
+      parameters:
+        - name: "limit"
+          in: "query"
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: "offset"
+          in: "query"
+          schema:
+            type: "integer"
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OrderList"
+        "202":
+          description: "Payment pending; the reconciler settles it"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/PlacedOrder"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+  /orders/{orderNo}:
+    get:
+      summary: "One of the caller's orders"
+      parameters:
+        - name: "orderNo"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            pattern: "^SS-[0-9]{5,12}$"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/OrderDetail"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+  /orders/{orderNo}/payments:
+    post:
+      summary: "Retry payment for a PENDING_PAYMENT order with the same reference"
+      parameters:
+        - name: "orderNo"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            pattern: "^SS-[0-9]{5,12}$"
+      responses:
+        "201":
+          description: "Created"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/PlacedOrder"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "402":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+        "409":
+          "$ref": "#/components/responses/Error"
+        "429":
+          "$ref": "#/components/responses/Error"
+        "503":
+          "$ref": "#/components/responses/Error"
+  /stock-alerts:
+    get:
+      summary: "The caller's Notify me alerts"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/AlertList"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+    post:
+      summary: "Notify me when an out-of-stock, restockable variant is back"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/AlertInput"
+      responses:
+        "201":
+          description: "Created"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Created"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+        "409":
+          "$ref": "#/components/responses/Error"
+        "429":
+          "$ref": "#/components/responses/Error"
+  /stock-alerts/{id}:
+    delete:
+      summary: "Cancel a pending alert"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "204":
+          description: "No content"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+        "429":
+          "$ref": "#/components/responses/Error"
+  /admin/dashboard:
+    get:
+      summary: "Counts filtered to the caller's roles"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Dashboard"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+  /admin/audit-events:
+    get:
+      summary: "Admin actions, newest first"
+      parameters:
+        - name: "limit"
+          in: "query"
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: "offset"
+          in: "query"
+          schema:
+            type: "integer"
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/AuditEvents"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+  /admin/products:
+    get:
+      summary: "Products for the editor"
+      parameters:
+        - name: "status"
+          in: "query"
+          schema:
+            type: "string"
+            enum:
+              - "ACTIVE"
+              - "DRAFT"
+              - "REMOVED"
+        - name: "q"
+          in: "query"
+          schema:
+            type: "string"
+        - name: "limit"
+          in: "query"
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: "offset"
+          in: "query"
+          schema:
+            type: "integer"
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/AdminProductList"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+    post:
+      summary: "Create a DRAFT product"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/ProductInput"
+      responses:
+        "201":
+          description: "Created"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/AdminProduct"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+        "409":
+          "$ref": "#/components/responses/Error"
+        "413":
+          "$ref": "#/components/responses/Error"
+  /admin/products/{id}:
+    get:
+      summary: "One product with every variant"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/AdminProduct"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+    patch:
+      summary: "Edit fields, or change status (publish, remove, restore)"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/ProductPatch"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/AdminProduct"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+        "409":
+          "$ref": "#/components/responses/Error"
+        "413":
+          "$ref": "#/components/responses/Error"
+    delete:
+      summary: "Delete a DRAFT that was never ordered"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "204":
+          description: "No content"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+        "409":
+          "$ref": "#/components/responses/Error"
+  /admin/products/{id}/removal-impact:
+    get:
+      summary: "What removing the product would touch"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/RemovalImpact"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+  /admin/products/{id}/options:
+    put:
+      summary: "Replace options and regenerate the variant matrix (keeps existing SKUs)"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/OptionsInput"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/AdminProduct"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+        "409":
+          "$ref": "#/components/responses/Error"
+        "413":
+          "$ref": "#/components/responses/Error"
+  /admin/products/{id}/variants/{variantId}:
+    patch:
+      summary: "Edit SKU, price delta, active and restock date"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+        - name: "variantId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/VariantPatch"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/AdminProduct"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+        "409":
+          "$ref": "#/components/responses/Error"
+  /admin/variants/{id}/stock-movements:
+    post:
+      summary: "Receive, adjust or write off stock"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/StockMovementInput"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/StockResult"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+        "409":
+          "$ref": "#/components/responses/Error"
+  /admin/categories:
+    get:
+      summary: "Every category"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/CategoryList"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+    post:
+      summary: "Create a category"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/CategoryInput"
+      responses:
+        "201":
+          description: "Created"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/AdminCategory"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "409":
+          "$ref": "#/components/responses/Error"
+  /admin/categories/{id}:
+    get:
+      summary: "One category"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/AdminCategory"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+    patch:
+      summary: "Edit a category"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/CategoryInput"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/AdminCategory"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+        "409":
+          "$ref": "#/components/responses/Error"
+    delete:
+      summary: "Delete a category no product points at"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "204":
+          description: "No content"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+        "409":
+          "$ref": "#/components/responses/Error"
+  /admin/demand:
+    get:
+      summary: "Pending alerts per variant"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Demand"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+  /admin/orders/search:
+    post:
+      summary: "Filter orders. With Accept: text/csv, the same rows as CSV (up to 5,000)"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/OrderSearch"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/AdminOrderList"
+            text/csv:
+              schema:
+                type: "string"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+  /admin/orders/{orderNo}:
+    get:
+      summary: "Any order with its notes"
+      parameters:
+        - name: "orderNo"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            pattern: "^SS-[0-9]{5,12}$"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/AdminOrderDetail"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+    patch:
+      summary: "Mark ready for pickup, or collected (with idChecked)"
+      parameters:
+        - name: "orderNo"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            pattern: "^SS-[0-9]{5,12}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/OrderPatch"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/AdminOrder"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+        "409":
+          "$ref": "#/components/responses/Error"
+  /admin/orders/{orderNo}/notes:
+    post:
+      summary: "Add a fulfilment note"
+      parameters:
+        - name: "orderNo"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            pattern: "^SS-[0-9]{5,12}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/NoteInput"
+      responses:
+        "201":
+          description: "Created"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+  /admin/pickup-offices:
+    get:
+      summary: "Every office, with the HR location mapping"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/AdminOfficeList"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+    post:
+      summary: "Create an office"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/OfficeInput"
+      responses:
+        "201":
+          description: "Created"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/AdminOffice"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "409":
+          "$ref": "#/components/responses/Error"
+  /admin/pickup-offices/{id}:
+    patch:
+      summary: "Edit or deactivate an office (never deleted)"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/OfficeInput"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/AdminOffice"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+        "409":
+          "$ref": "#/components/responses/Error"
+components:
+  securitySchemes:
+    jwtAssertion:
+      type: "apiKey"
+      in: "header"
+      name: "x-jwt-assertion"
+  responses:
+    Error:
+      description: "Error"
+      content:
+        application/json:
+          schema:
+            "$ref": "#/components/schemas/ErrorPayload"
+  schemas:
+    ErrorPayload:
+      type: "object"
+      properties:
+        message:
+          type: "string"
+        errorCode:
+          type: "string"
+          description: "Stable snake_case code. Clients branch on this, never on message"
+      required:
+        - "message"
+    DependencyHealth:
+      type: "object"
+      properties:
+        database:
+          type: "string"
+        transactionService:
+          type: "string"
+        treasury:
+          type: "string"
+        hrEntity:
+          type: "string"
+        email:
+          type: "string"
+    Me:
+      type: "object"
+      properties:
+        email:
+          type: "string"
+        firstName:
+          type: "string"
+        lastName:
+          type: "string"
+        roles:
+          type: "array"
+          items:
+            type: "string"
+            enum:
+              - "catalog_manager"
+              - "fulfilment_ops"
+        employeeStatus:
+          type: "string"
+          nullable: true
+      required:
+        - "email"
+        - "firstName"
+        - "lastName"
+        - "roles"
+        - "employeeStatus"
+    Wallet:
+      type: "object"
+      properties:
+        walletAddress:
+          type: "string"
+        balance:
+          type: "string"
+          description: "Decimal as a string"
+        defaultWallet:
+          type: "boolean"
+      required:
+        - "walletAddress"
+        - "balance"
+        - "defaultWallet"
+    Category:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        slug:
+          type: "string"
+        name:
+          type: "string"
+    Availability:
+      type: "string"
+      enum:
+        - "IN_STOCK"
+        - "LOW_STOCK"
+        - "OUT_OF_STOCK"
+        - "SOLD_OUT"
+    ProductCard:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        slug:
+          type: "string"
+        name:
+          type: "string"
+        price:
+          type: "integer"
+          format: "int64"
+        image:
+          type: "string"
+          nullable: true
+        availability:
+          "$ref": "#/components/schemas/Availability"
+        status:
+          type: "string"
+    ProductList:
+      type: "object"
+      properties:
+        items:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/ProductCard"
+        total:
+          type: "integer"
+          format: "int64"
+      required:
+        - "items"
+        - "total"
+    OptionValue:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        value:
+          type: "string"
+        swatchHex:
+          type: "string"
+          nullable: true
+    Option:
+      type: "object"
+      properties:
+        name:
+          type: "string"
+        values:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/OptionValue"
+    Variant:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        sku:
+          type: "string"
+        price:
+          type: "integer"
+          format: "int64"
+        options:
+          type: "string"
+        optionValueIds:
+          type: "array"
+          items:
+            type: "string"
+            format: "uuid"
+        availability:
+          "$ref": "#/components/schemas/Availability"
+        stockLeft:
+          type: "integer"
+          nullable: true
+        restockEta:
+          type: "string"
+          format: "date"
+          nullable: true
+    Image:
+      type: "object"
+      properties:
+        url:
+          type: "string"
+        alt:
+          type: "string"
+    ProductDetail:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        slug:
+          type: "string"
+        name:
+          type: "string"
+        description:
+          type: "string"
+        price:
+          type: "integer"
+          format: "int64"
+        status:
+          type: "string"
+          enum:
+            - "ACTIVE"
+            - "REMOVED"
+        restockPolicy:
+          type: "string"
+        maxPerUser:
+          type: "integer"
+          nullable: true
+        options:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/Option"
+        variants:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/Variant"
+        images:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/Image"
+        alternatives:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/ProductCard"
+    LineState:
+      type: "string"
+      enum:
+        - "OK"
+        - "OUT_OF_STOCK"
+        - "REMOVED"
+        - "LIMIT"
+    CartLine:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        variantId:
+          type: "string"
+          format: "uuid"
+        productSlug:
+          type: "string"
+        name:
+          type: "string"
+        options:
+          type: "string"
+        image:
+          type: "string"
+          nullable: true
+        unitPrice:
+          type: "integer"
+          format: "int64"
+        quantity:
+          type: "integer"
+          format: "int64"
+        lineTotal:
+          type: "integer"
+          format: "int64"
+        state:
+          "$ref": "#/components/schemas/LineState"
+        reason:
+          type: "string"
+          nullable: true
+        availability:
+          "$ref": "#/components/schemas/Availability"
+    Cart:
+      type: "object"
+      properties:
+        lines:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/CartLine"
+        itemCount:
+          type: "integer"
+          format: "int64"
+        total:
+          type: "integer"
+          format: "int64"
+    CartSummary:
+      type: "object"
+      properties:
+        itemCount:
+          type: "integer"
+          format: "int64"
+      required:
+        - "itemCount"
+    CartLineInput:
+      type: "object"
+      properties:
+        variantId:
+          type: "string"
+          format: "uuid"
+        quantity:
+          type: "integer"
+          minimum: 1
+          maximum: 99
+      required:
+        - "variantId"
+        - "quantity"
+      additionalProperties: false
+    CartQuantity:
+      type: "object"
+      properties:
+        quantity:
+          type: "integer"
+          minimum: 1
+          maximum: 99
+      required:
+        - "quantity"
+      additionalProperties: false
+    Created:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+    Office:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        name:
+          type: "string"
+        address:
+          type: "string"
+        collectionPoint:
+          type: "string"
+        hours:
+          type: "string"
+        leadTimeDays:
+          type: "integer"
+          format: "int64"
+    OfficeList:
+      type: "object"
+      properties:
+        items:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/Office"
+        defaultOfficeId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+    CheckoutInput:
+      type: "object"
+      properties:
+        pickupOfficeId:
+          type: "string"
+          format: "uuid"
+        walletAddress:
+          type: "string"
+        expectedTotal:
+          type: "integer"
+          format: "int64"
+          description: "The total the shopper confirmed. A different total is 409 quote_changed"
+      required:
+        - "pickupOfficeId"
+        - "walletAddress"
+      additionalProperties: false
+      description: "There is no payee field: the store always pays its pinned treasury"
+    Problem:
+      type: "object"
+      properties:
+        code:
+          type: "string"
+        message:
+          type: "string"
+    Quote:
+      type: "object"
+      properties:
+        lines:
+          type: "array"
+          items:
+            type: "object"
+            properties:
+              lineId:
+                type: "string"
+                format: "uuid"
+              name:
+                type: "string"
+              options:
+                type: "string"
+              unitPrice:
+                type: "integer"
+                format: "int64"
+              quantity:
+                type: "integer"
+                format: "int64"
+              state:
+                "$ref": "#/components/schemas/LineState"
+              reason:
+                type: "string"
+                nullable: true
+        total:
+          type: "integer"
+          format: "int64"
+        pickupOffice:
+          type: "object"
+          properties:
+            id:
+              type: "string"
+              format: "uuid"
+            name:
+              type: "string"
+            leadTimeDays:
+              type: "integer"
+              format: "int64"
+          nullable: true
+        wallet:
+          type: "object"
+          properties:
+            walletAddress:
+              type: "string"
+            balance:
+              type: "string"
+          nullable: true
+        canPlace:
+          type: "boolean"
+        problems:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/Problem"
+    OrderStatus:
+      type: "string"
+      enum:
+        - "PENDING_PAYMENT"
+        - "CONFIRMED"
+        - "FAILED"
+        - "READY_FOR_PICKUP"
+        - "COLLECTED"
+    PlacedOrder:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        orderNo:
+          type: "string"
+        status:
+          "$ref": "#/components/schemas/OrderStatus"
+        total:
+          type: "integer"
+          format: "int64"
+        pickupOffice:
+          type: "object"
+          properties:
+            name:
+              type: "string"
+        placedAt:
+          type: "string"
+          format: "date-time"
+    OrderSummary:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        orderNo:
+          type: "string"
+        status:
+          "$ref": "#/components/schemas/OrderStatus"
+        total:
+          type: "integer"
+          format: "int64"
+        officeName:
+          type: "string"
+        placedAt:
+          type: "string"
+          format: "date-time"
+        failureCode:
+          type: "string"
+          nullable: true
+    OrderList:
+      type: "object"
+      properties:
+        items:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/OrderSummary"
+        total:
+          type: "integer"
+          format: "int64"
+      required:
+        - "items"
+        - "total"
+    OrderDetail:
+      allOf:
+        - "$ref": "#/components/schemas/OrderSummary"
+        - type: "object"
+          properties:
+            lines:
+              type: "array"
+              items:
+                type: "object"
+                properties:
+                  name:
+                    type: "string"
+                  options:
+                    type: "string"
+                  sku:
+                    type: "string"
+                  unitPrice:
+                    type: "integer"
+                    format: "int64"
+                  quantity:
+                    type: "integer"
+                    format: "int64"
+            timeline:
+              type: "array"
+              items:
+                type: "object"
+                properties:
+                  from:
+                    type: "string"
+                    nullable: true
+                  to:
+                    type: "string"
+                  note:
+                    type: "string"
+                    nullable: true
+                  at:
+                    type: "string"
+                    format: "date-time"
+            pickupOffice:
+              "$ref": "#/components/schemas/Office"
+            confirmedAt:
+              type: "string"
+              format: "date-time"
+              nullable: true
+            readyAt:
+              type: "string"
+              format: "date-time"
+              nullable: true
+            collectedAt:
+              type: "string"
+              format: "date-time"
+              nullable: true
+    Alert:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        variantId:
+          type: "string"
+          format: "uuid"
+        sku:
+          type: "string"
+        productSlug:
+          type: "string"
+        productName:
+          type: "string"
+        options:
+          type: "string"
+        status:
+          type: "string"
+          enum:
+            - "PENDING"
+            - "NOTIFIED"
+            - "CLOSED"
+        createdAt:
+          type: "string"
+          format: "date-time"
+        notifiedAt:
+          type: "string"
+          format: "date-time"
+          nullable: true
+        closedAt:
+          type: "string"
+          format: "date-time"
+          nullable: true
+    AlertList:
+      type: "object"
+      properties:
+        items:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/Alert"
+    AlertInput:
+      type: "object"
+      properties:
+        variantId:
+          type: "string"
+          format: "uuid"
+      required:
+        - "variantId"
+      additionalProperties: false
+    Dashboard:
+      type: "object"
+      properties:
+        catalog:
+          type: "object"
+          properties:
+            active:
+              type: "integer"
+              format: "int64"
+            draft:
+              type: "integer"
+              format: "int64"
+            removed:
+              type: "integer"
+              format: "int64"
+            lowStockVariants:
+              type: "integer"
+              format: "int64"
+            outOfStockVariants:
+              type: "integer"
+              format: "int64"
+            pendingAlerts:
+              type: "integer"
+              format: "int64"
+        orders:
+          type: "object"
+          properties:
+            pendingPayment:
+              type: "integer"
+              format: "int64"
+            toPrepare:
+              type: "integer"
+              format: "int64"
+            readyForPickup:
+              type: "integer"
+              format: "int64"
+            collectedToday:
+              type: "integer"
+              format: "int64"
+            needsAttention:
+              type: "array"
+              items:
+                "$ref": "#/components/schemas/AdminOrder"
+      description: "Each section is present only for the role that may see it"
+    AuditEvents:
+      type: "object"
+      properties:
+        items:
+          type: "array"
+          items:
+            type: "object"
+            properties:
+              id:
+                type: "integer"
+                format: "int64"
+              actorEmail:
+                type: "string"
+              action:
+                type: "string"
+              entityType:
+                type: "string"
+              entityId:
+                type: "string"
+              detail:
+                type: "object"
+                nullable: true
+              createdAt:
+                type: "string"
+                format: "date-time"
+        total:
+          type: "integer"
+          format: "int64"
+      required:
+        - "items"
+        - "total"
+    AdminProductList:
+      type: "object"
+      properties:
+        items:
+          type: "array"
+          items:
+            type: "object"
+            properties:
+              id:
+                type: "string"
+                format: "uuid"
+              slug:
+                type: "string"
+              name:
+                type: "string"
+              status:
+                type: "string"
+              price:
+                type: "integer"
+                format: "int64"
+              image:
+                type: "string"
+                nullable: true
+              freeStock:
+                type: "integer"
+                format: "int64"
+              unitsSold30d:
+                type: "integer"
+                format: "int64"
+        total:
+          type: "integer"
+          format: "int64"
+      required:
+        - "items"
+        - "total"
+    AdminProduct:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        slug:
+          type: "string"
+        name:
+          type: "string"
+        description:
+          type: "string"
+        categoryId:
+          type: "string"
+          nullable: true
+        price:
+          type: "integer"
+          format: "int64"
+        restockPolicy:
+          type: "string"
+        maxPerUser:
+          type: "integer"
+          nullable: true
+        limitWindowDays:
+          type: "integer"
+          nullable: true
+        status:
+          type: "string"
+          enum:
+            - "DRAFT"
+            - "ACTIVE"
+            - "REMOVED"
+        publishedAt:
+          type: "string"
+          format: "date-time"
+          nullable: true
+        removedAt:
+          type: "string"
+          format: "date-time"
+          nullable: true
+        removalNote:
+          type: "string"
+          nullable: true
+        options:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/Option"
+        variants:
+          type: "array"
+          items:
+            type: "object"
+            properties:
+              id:
+                type: "string"
+                format: "uuid"
+              sku:
+                type: "string"
+              options:
+                type: "string"
+              optionValueIds:
+                type: "array"
+                items:
+                  type: "string"
+                  format: "uuid"
+              priceDelta:
+                type: "integer"
+                format: "int64"
+              onHand:
+                type: "integer"
+                format: "int64"
+              reserved:
+                type: "integer"
+                format: "int64"
+              free:
+                type: "integer"
+                format: "int64"
+              restockEta:
+                type: "string"
+                format: "date"
+                nullable: true
+              active:
+                type: "boolean"
+        images:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/Image"
+        alternatives:
+          type: "array"
+          items:
+            type: "string"
+            format: "uuid"
+    ProductInput:
+      type: "object"
+      properties:
+        name:
+          type: "string"
+          maxLength: 200
+        slug:
+          type: "string"
+          pattern: "^[a-z0-9]+(-[a-z0-9]+)*$"
+        description:
+          type: "string"
+          maxLength: 2000
+          description: "Plain text"
+        categoryId:
+          type: "string"
+          format: "uuid"
+          nullable: true
+        price:
+          type: "integer"
+          minimum: 1
+          maximum: 1000000
+        restockPolicy:
+          type: "string"
+          enum:
+            - "RESTOCKABLE"
+            - "LIMITED"
+        maxPerUser:
+          type: "integer"
+          minimum: 1
+          maximum: 99
+          nullable: true
+        limitWindowDays:
+          type: "integer"
+          nullable: true
+        images:
+          type: "array"
+          items:
+            type: "object"
+            properties:
+              url:
+                type: "string"
+                description: "https on IMAGE_URL_HOSTS"
+              alt:
+                type: "string"
+        alternatives:
+          type: "array"
+          items:
+            type: "string"
+            format: "uuid"
+      additionalProperties: false
+    ProductPatch:
+      description: "Either ProductInput fields, or a status change carrying only status and removalNote"
+      oneOf:
+        - "$ref": "#/components/schemas/ProductInput"
+        - type: "object"
+          properties:
+            status:
+              type: "string"
+              enum:
+                - "ACTIVE"
+                - "REMOVED"
+            removalNote:
+              type: "string"
+              maxLength: 500
+          required:
+            - "status"
+          additionalProperties: false
+    RemovalImpact:
+      type: "object"
+      properties:
+        openOrders:
+          type: "array"
+          items:
+            type: "object"
+            properties:
+              orderNo:
+                type: "string"
+              status:
+                type: "string"
+              units:
+                type: "integer"
+                format: "int64"
+        openUnits:
+          type: "integer"
+          format: "int64"
+        carts:
+          type: "integer"
+          format: "int64"
+        cartUnits:
+          type: "integer"
+          format: "int64"
+        pendingAlerts:
+          type: "integer"
+          format: "int64"
+        freeStock:
+          type: "integer"
+          format: "int64"
+    OptionsInput:
+      type: "object"
+      properties:
+        options:
+          type: "array"
+          items:
+            type: "object"
+            properties:
+              name:
+                type: "string"
+              values:
+                type: "array"
+                items:
+                  type: "object"
+                  properties:
+                    value:
+                      type: "string"
+                    swatchHex:
+                      type: "string"
+                      pattern: "^#[0-9A-Fa-f]{6}$"
+      required:
+        - "options"
+      additionalProperties: false
+    VariantPatch:
+      type: "object"
+      properties:
+        sku:
+          type: "string"
+        priceDelta:
+          type: "integer"
+          format: "int64"
+        active:
+          type: "boolean"
+        restockEta:
+          type: "string"
+          format: "date"
+          nullable: true
+      additionalProperties: false
+    StockMovementInput:
+      type: "object"
+      properties:
+        delta:
+          type: "integer"
+        reason:
+          type: "string"
+          enum:
+            - "RECEIVE"
+            - "ADJUST"
+            - "WRITE_OFF"
+        note:
+          type: "string"
+          maxLength: 500
+      required:
+        - "delta"
+        - "reason"
+      additionalProperties: false
+    StockResult:
+      type: "object"
+      properties:
+        onHand:
+          type: "integer"
+          format: "int64"
+        reserved:
+          type: "integer"
+          format: "int64"
+        free:
+          type: "integer"
+          format: "int64"
+        notified:
+          type: "integer"
+          format: "int64"
+    AdminCategory:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        slug:
+          type: "string"
+        name:
+          type: "string"
+        sort:
+          type: "integer"
+          format: "int64"
+    CategoryList:
+      type: "object"
+      properties:
+        items:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/AdminCategory"
+    CategoryInput:
+      type: "object"
+      properties:
+        slug:
+          type: "string"
+        name:
+          type: "string"
+        sort:
+          type: "integer"
+          format: "int64"
+      additionalProperties: false
+    Demand:
+      type: "object"
+      properties:
+        items:
+          type: "array"
+          items:
+            type: "object"
+            properties:
+              productId:
+                type: "string"
+                format: "uuid"
+              productName:
+                type: "string"
+              variantId:
+                type: "string"
+                format: "uuid"
+              sku:
+                type: "string"
+              options:
+                type: "string"
+              pendingAlerts:
+                type: "integer"
+                format: "int64"
+              firstAlertAt:
+                type: "string"
+                format: "date-time"
+              restockEta:
+                type: "string"
+                format: "date-time"
+                nullable: true
+              free:
+                type: "integer"
+                format: "int64"
+    OrderSearch:
+      type: "object"
+      properties:
+        filters:
+          type: "object"
+          properties:
+            status:
+              "$ref": "#/components/schemas/OrderStatus"
+            pickupOfficeId:
+              type: "string"
+              format: "uuid"
+            searchQuery:
+              type: "string"
+              description: "Order number or email"
+            from:
+              type: "string"
+            to:
+              type: "string"
+        pagination:
+          type: "object"
+          properties:
+            limit:
+              type: "integer"
+              minimum: 1
+              maximum: 100
+            offset:
+              type: "integer"
+              minimum: 0
+      additionalProperties: false
+    AdminOrder:
+      allOf:
+        - "$ref": "#/components/schemas/OrderSummary"
+        - type: "object"
+          properties:
+            userEmail:
+              type: "string"
+            userName:
+              type: "string"
+            attentionReason:
+              type: "string"
+              nullable: true
+    AdminOrderList:
+      type: "object"
+      properties:
+        items:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/AdminOrder"
+        total:
+          type: "integer"
+          format: "int64"
+      required:
+        - "items"
+        - "total"
+    AdminOrderDetail:
+      allOf:
+        - "$ref": "#/components/schemas/OrderDetail"
+        - type: "object"
+          properties:
+            userEmail:
+              type: "string"
+            userName:
+              type: "string"
+            attentionReason:
+              type: "string"
+              nullable: true
+            paymentReference:
+              type: "string"
+            collectedBy:
+              type: "string"
+              nullable: true
+            notes:
+              type: "array"
+              items:
+                type: "object"
+                properties:
+                  note:
+                    type: "string"
+                  actor:
+                    type: "string"
+                  at:
+                    type: "string"
+                    format: "date-time"
+    OrderPatch:
+      type: "object"
+      properties:
+        status:
+          type: "string"
+          enum:
+            - "READY_FOR_PICKUP"
+            - "COLLECTED"
+        idChecked:
+          type: "boolean"
+          description: "Must be true for COLLECTED"
+        note:
+          type: "string"
+      required:
+        - "status"
+      additionalProperties: false
+    NoteInput:
+      type: "object"
+      properties:
+        note:
+          type: "string"
+          maxLength: 1000
+      required:
+        - "note"
+      additionalProperties: false
+    AdminOffice:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        name:
+          type: "string"
+        address:
+          type: "string"
+        country:
+          type: "string"
+        collectionPoint:
+          type: "string"
+        hours:
+          type: "string"
+        leadTimeDays:
+          type: "integer"
+          format: "int64"
+        hrLocations:
+          type: "array"
+          items:
+            type: "string"
+        active:
+          type: "boolean"
+        sort:
+          type: "integer"
+          format: "int64"
+    AdminOfficeList:
+      type: "object"
+      properties:
+        items:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/AdminOffice"
+    OfficeInput:
+      type: "object"
+      properties:
+        name:
+          type: "string"
+        address:
+          type: "string"
+        country:
+          type: "string"
+        collectionPoint:
+          type: "string"
+        hours:
+          type: "string"
+        leadTimeDays:
+          type: "integer"
+          format: "int64"
+        hrLocations:
+          type: "array"
+          items:
+            type: "string"
+        active:
+          type: "boolean"
+        sort:
+          type: "integer"
+          format: "int64"
+      additionalProperties: false

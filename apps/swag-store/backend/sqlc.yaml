@@ -1,0 +1,40 @@
+version: "2"
+sql:
+  - engine: mysql
+    schema: migrations
+    queries: queries
+    gen:
+      go:
+        package: store
+        out: internal/store
+        emit_interface: false
+        emit_result_struct_pointers: false
+        # Every table is swag_*; keep the Go names without the prefix.
+        rename:
+          swag_category: Category
+          swag_product: Product
+          swag_product_option: ProductOption
+          swag_option_value: OptionValue
+          swag_product_image: ProductImage
+          swag_variant: Variant
+          swag_variant_option_value: VariantOptionValue
+          swag_product_alternative: ProductAlternative
+          swag_inventory_movement: InventoryMovement
+          swag_product_stat: ProductStat
+          swag_cart_line: CartLine
+          swag_pickup_office: PickupOffice
+          swag_order_number: OrderNumber
+          swag_order: Order
+          swag_order_line: OrderLine
+          swag_order_event: OrderEvent
+          swag_order_note: OrderNote
+          swag_stock_alert: StockAlert
+          swag_notification_outbox: NotificationOutbox
+          swag_admin_action: AdminAction
+          swag_job_state: JobState
+          swag_products_status: ProductStatus
+          swag_products_restock_policy: RestockPolicy
+          swag_orders_status: OrderStatus
+          swag_inventory_movements_reason: MovementReason
+          swag_notification_outbox_status: OutboxStatus
+          swag_stock_alerts_status: AlertStatus

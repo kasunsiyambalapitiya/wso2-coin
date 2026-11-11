@@ -1,0 +1,23 @@
+# Environment
+.env
+
+# Build output
+/server
+/bin/
+dist/
+
+# Test output
+*.test
+*.out
+coverage.html
+coverage.out
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
