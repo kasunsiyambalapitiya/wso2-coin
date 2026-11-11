@@ -293,3 +293,30 @@ func TestSetOptionsKeepsSKUs(t *testing.T) {
 		t.Fatalf("after change: %+v (before %+v)", active, skus)
 	}
 }
+
+// An audit row without detail (category_deleted, order_note_added) must read
+// back as detail null, not fail the whole audit page.
+func TestAuditEventWithoutDetailReads(t *testing.T) {
+	s := repository.New(testdb.Open(t))
+	ctx := context.Background()
+	c, err := s.SaveCategory(ctx, admin, repository.Category{Slug: "drinkware", Name: "Drinkware"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteCategory(ctx, admin, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	events, _, err := s.AuditEvents(ctx, 50, 0)
+	if err != nil {
+		t.Fatalf("AuditEvents: %v", err)
+	}
+	for _, e := range events {
+		if e.Action == "category_deleted" {
+			if string(e.Detail) != "null" {
+				t.Fatalf("detail = %s, want null", e.Detail)
+			}
+			return
+		}
+	}
+	t.Fatal("category_deleted event missing")
+}

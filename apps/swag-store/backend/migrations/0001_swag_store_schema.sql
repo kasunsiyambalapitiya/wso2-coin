@@ -308,7 +308,7 @@ CREATE TABLE swag_admin_actions (
     action        VARCHAR(60)  NOT NULL,
     entity_type   VARCHAR(40)  NOT NULL,
     entity_id     VARCHAR(64)  NOT NULL,
-    detail_json   JSON         NULL,
+    detail_json   JSON         NOT NULL, -- JSON null when the action has no detail; SQL NULL would not scan
     created_at    DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     PRIMARY KEY (id),
     KEY admin_actions_created_idx (created_at),

@@ -172,7 +172,7 @@ func enqueue(ctx context.Context, q *store.Queries, template, to string, payload
 
 // audit writes one swag_admin_actions row in the caller's transaction.
 func audit(ctx context.Context, q *store.Queries, a Actor, action, entityType, entityID string, detail any) error {
-	var raw json.RawMessage
+	raw := json.RawMessage("null") // the column is NOT NULL: no detail is JSON null
 	if detail != nil {
 		b, err := json.Marshal(detail)
 		if err != nil {
