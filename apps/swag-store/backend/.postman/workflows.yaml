@@ -1,4 +1,0 @@
-workflows:
-  syncSpecToCollection:
-    - spec: ../openapi.yaml
-      collection: ../postman/collections/Swag Store API
