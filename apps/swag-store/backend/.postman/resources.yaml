@@ -1,9 +1,0 @@
-localResources:
-  collections:
-    - ../postman/collections/Swag Store API
-  environments:
-    - ../postman/environments/Swag Store local.environment.yaml
-  specs:
-    - ../openapi.yaml
-workspace:
-  id: ''

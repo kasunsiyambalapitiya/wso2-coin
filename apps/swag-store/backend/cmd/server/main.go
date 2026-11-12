@@ -40,7 +40,6 @@ import (
 	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/coins"
 	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/handler"
 	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/hr"
-	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/jobs"
 	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/middleware"
 	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/migrate"
 	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/notifications"
@@ -108,7 +107,6 @@ func run() error {
 	svc := checkout.NewService(repo, coinsClient, employees, treasury)
 
 	// Email is optional: without EMAIL_BASE_URL the outbox rows wait.
-	var sender notifications.Sender
 	emailProbe := handler.Probe{Name: "email", Check: func(context.Context) string { return handler.StatusNotConfigured }}
 	if cfg.Email.BaseURL != "" {
 		emailClient := notifications.NewEmailClient(notifications.EmailConfig{
@@ -116,7 +114,6 @@ func run() error {
 			ClientSecret: cfg.Email.ClientSecret, Scopes: cfg.Email.Scopes, FromAddress: cfg.EmailFromAddress,
 			Timeout: cfg.UpstreamTimeout,
 		})
-		sender = notifications.WithDebugRedirect(emailClient, cfg.EmailDebug)
 		emailProbe = handler.ErrProbe("email", emailClient.Health)
 	}
 
@@ -133,25 +130,13 @@ func run() error {
 			handler.ErrProbe("hrEntity", hrClient.Health),
 			emailProbe,
 		}),
-		users:        handler.NewUsersHandler(guard, employees),
-		wallets:      handler.NewWalletsHandler(coinsClient),
-		catalog:      handler.NewCatalogHandler(repo, listCache, cfg.LowStockThreshold),
-		cart:         handler.NewCartHandler(repo, cfg.LowStockThreshold),
-		offices:      handler.NewOfficesHandler(repo, employees),
-		orders:       handler.NewOrdersHandler(svc, repo),
-		alerts:       handler.NewAlertsHandler(repo),
-		admin:        handler.NewAdminHandler(guard, repo, cfg.LowStockThreshold, cfg.Timezone),
-		adminCatalog: handler.NewAdminCatalogHandler(repo, listCache, cfg.ImageHosts),
-		adminOrders:  handler.NewAdminOrdersHandler(repo),
-	}
-
-	jobsCtx, stopJobs := context.WithCancel(context.WithoutCancel(ctx))
-	defer stopJobs()
-	if cfg.JobsEnabled {
-		common := notifications.Common{StoreURL: cfg.WebURL, ContactEmail: cfg.ContactEmail, Timezone: cfg.Timezone}
-		jobs.NewRunner(repo).Start(jobsCtx, backgroundJobs(cfg, repo, svc, coinsClient, sender, common))
-	} else {
-		slog.Warn("JOBS_ENABLED=false: background jobs are off on this replica")
+		users:   handler.NewUsersHandler(guard, employees),
+		wallets: handler.NewWalletsHandler(coinsClient),
+		catalog: handler.NewCatalogHandler(repo, listCache, cfg.LowStockThreshold),
+		cart:    handler.NewCartHandler(repo, cfg.LowStockThreshold),
+		offices: handler.NewOfficesHandler(repo, employees),
+		orders:  handler.NewOrdersHandler(svc, repo),
+		alerts:  handler.NewAlertsHandler(repo),
 	}
 
 	gin.SetMode(gin.ReleaseMode)
@@ -187,7 +172,6 @@ func run() error {
 	case <-ctx.Done():
 	}
 	slog.Info("shutting down")
-	stopJobs()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
