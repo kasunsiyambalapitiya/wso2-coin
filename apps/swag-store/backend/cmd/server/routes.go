@@ -35,6 +35,7 @@ var (
 	limitOrders = &rateLimit{"orders", 5}
 	limitCart   = &rateLimit{"cart", 30}
 	limitAlerts = &rateLimit{"alerts", 30}
+	limitAdmin  = &rateLimit{"admin", 60} // every admin write, both roles
 )
 
 // routeDef is one row of the route table. Perm is required; there is no default.
@@ -105,29 +106,29 @@ func routeTable(a *app) []routeDef {
 
 		// Admin: Catalog Manager.
 		{get, "/admin/products", permCatalog, nil, a.adminCatalog.List},
-		{post, "/admin/products", permCatalog, nil, a.adminCatalog.Create},
+		{post, "/admin/products", permCatalog, limitAdmin, a.adminCatalog.Create},
 		{get, "/admin/products/:id", permCatalog, nil, a.adminCatalog.Get},
-		{patch, "/admin/products/:id", permCatalog, nil, a.adminCatalog.Patch},
-		{del, "/admin/products/:id", permCatalog, nil, a.adminCatalog.Delete},
+		{patch, "/admin/products/:id", permCatalog, limitAdmin, a.adminCatalog.Patch},
+		{del, "/admin/products/:id", permCatalog, limitAdmin, a.adminCatalog.Delete},
 		{get, "/admin/products/:id/removal-impact", permCatalog, nil, a.adminCatalog.RemovalImpact},
-		{put, "/admin/products/:id/options", permCatalog, nil, a.adminCatalog.SetOptions},
-		{patch, "/admin/products/:id/variants/:variantId", permCatalog, nil, a.adminCatalog.PatchVariant},
-		{post, "/admin/variants/:id/stock-movements", permCatalog, nil, a.adminCatalog.StockMovement},
+		{put, "/admin/products/:id/options", permCatalog, limitAdmin, a.adminCatalog.SetOptions},
+		{patch, "/admin/products/:id/variants/:variantId", permCatalog, limitAdmin, a.adminCatalog.PatchVariant},
+		{post, "/admin/variants/:id/stock-movements", permCatalog, limitAdmin, a.adminCatalog.StockMovement},
 		{get, "/admin/categories", permCatalog, nil, a.adminCatalog.Categories},
-		{post, "/admin/categories", permCatalog, nil, a.adminCatalog.CreateCategory},
+		{post, "/admin/categories", permCatalog, limitAdmin, a.adminCatalog.CreateCategory},
 		{get, "/admin/categories/:id", permCatalog, nil, a.adminCatalog.GetCategory},
-		{patch, "/admin/categories/:id", permCatalog, nil, a.adminCatalog.PatchCategory},
-		{del, "/admin/categories/:id", permCatalog, nil, a.adminCatalog.DeleteCategory},
+		{patch, "/admin/categories/:id", permCatalog, limitAdmin, a.adminCatalog.PatchCategory},
+		{del, "/admin/categories/:id", permCatalog, limitAdmin, a.adminCatalog.DeleteCategory},
 		{get, "/admin/demand", permCatalog, nil, a.adminCatalog.Demand},
 
 		// Admin: Fulfilment Ops.
 		{post, "/admin/orders/search", permFulfil, nil, a.adminOrders.Search},
 		{get, "/admin/orders/:orderNo", permFulfil, nil, a.adminOrders.Get},
-		{patch, "/admin/orders/:orderNo", permFulfil, nil, a.adminOrders.Patch},
-		{post, "/admin/orders/:orderNo/notes", permFulfil, nil, a.adminOrders.AddNote},
+		{patch, "/admin/orders/:orderNo", permFulfil, limitAdmin, a.adminOrders.Patch},
+		{post, "/admin/orders/:orderNo/notes", permFulfil, limitAdmin, a.adminOrders.AddNote},
 		{get, "/admin/pickup-offices", permFulfil, nil, a.offices.AdminList},
-		{post, "/admin/pickup-offices", permFulfil, nil, a.offices.Create},
-		{patch, "/admin/pickup-offices/:id", permFulfil, nil, a.offices.Update},
+		{post, "/admin/pickup-offices", permFulfil, limitAdmin, a.offices.Create},
+		{patch, "/admin/pickup-offices/:id", permFulfil, limitAdmin, a.offices.Update},
 	}
 }
 

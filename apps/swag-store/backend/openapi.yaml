@@ -588,7 +588,7 @@ paths:
         content:
           application/json:
             schema:
-              "$ref": "#/components/schemas/ProductInput"
+              "$ref": "#/components/schemas/ProductCreate"
       responses:
         "201":
           description: "Created"
@@ -607,6 +607,8 @@ paths:
         "409":
           "$ref": "#/components/responses/Error"
         "413":
+          "$ref": "#/components/responses/Error"
+        "429":
           "$ref": "#/components/responses/Error"
   /admin/products/{id}:
     get:
@@ -667,6 +669,8 @@ paths:
           "$ref": "#/components/responses/Error"
         "413":
           "$ref": "#/components/responses/Error"
+        "429":
+          "$ref": "#/components/responses/Error"
     delete:
       summary: "Delete a DRAFT that was never ordered"
       parameters:
@@ -688,6 +692,8 @@ paths:
         "404":
           "$ref": "#/components/responses/Error"
         "409":
+          "$ref": "#/components/responses/Error"
+        "429":
           "$ref": "#/components/responses/Error"
   /admin/products/{id}/removal-impact:
     get:
@@ -749,6 +755,8 @@ paths:
           "$ref": "#/components/responses/Error"
         "413":
           "$ref": "#/components/responses/Error"
+        "429":
+          "$ref": "#/components/responses/Error"
   /admin/products/{id}/variants/{variantId}:
     patch:
       summary: "Edit SKU, price delta, active and restock date"
@@ -788,6 +796,8 @@ paths:
           "$ref": "#/components/responses/Error"
         "409":
           "$ref": "#/components/responses/Error"
+        "429":
+          "$ref": "#/components/responses/Error"
   /admin/variants/{id}/stock-movements:
     post:
       summary: "Receive, adjust or write off stock"
@@ -821,6 +831,8 @@ paths:
           "$ref": "#/components/responses/Error"
         "409":
           "$ref": "#/components/responses/Error"
+        "429":
+          "$ref": "#/components/responses/Error"
   /admin/categories:
     get:
       summary: "Every category"
@@ -842,7 +854,7 @@ paths:
         content:
           application/json:
             schema:
-              "$ref": "#/components/schemas/CategoryInput"
+              "$ref": "#/components/schemas/CategoryCreate"
       responses:
         "201":
           description: "Created"
@@ -857,6 +869,8 @@ paths:
         "403":
           "$ref": "#/components/responses/Error"
         "409":
+          "$ref": "#/components/responses/Error"
+        "429":
           "$ref": "#/components/responses/Error"
   /admin/categories/{id}:
     get:
@@ -915,6 +929,8 @@ paths:
           "$ref": "#/components/responses/Error"
         "409":
           "$ref": "#/components/responses/Error"
+        "429":
+          "$ref": "#/components/responses/Error"
     delete:
       summary: "Delete a category no product points at"
       parameters:
@@ -936,6 +952,8 @@ paths:
         "404":
           "$ref": "#/components/responses/Error"
         "409":
+          "$ref": "#/components/responses/Error"
+        "429":
           "$ref": "#/components/responses/Error"
   /admin/demand:
     get:
@@ -1031,6 +1049,8 @@ paths:
           "$ref": "#/components/responses/Error"
         "409":
           "$ref": "#/components/responses/Error"
+        "429":
+          "$ref": "#/components/responses/Error"
   /admin/orders/{orderNo}/notes:
     post:
       summary: "Add a fulfilment note"
@@ -1057,6 +1077,8 @@ paths:
         "403":
           "$ref": "#/components/responses/Error"
         "404":
+          "$ref": "#/components/responses/Error"
+        "429":
           "$ref": "#/components/responses/Error"
   /admin/pickup-offices:
     get:
@@ -1095,6 +1117,8 @@ paths:
           "$ref": "#/components/responses/Error"
         "409":
           "$ref": "#/components/responses/Error"
+        "429":
+          "$ref": "#/components/responses/Error"
   /admin/pickup-offices/{id}:
     patch:
       summary: "Edit or deactivate an office (never deleted)"
@@ -1127,6 +1151,8 @@ paths:
         "404":
           "$ref": "#/components/responses/Error"
         "409":
+          "$ref": "#/components/responses/Error"
+        "429":
           "$ref": "#/components/responses/Error"
 components:
   securitySchemes:
@@ -1964,6 +1990,13 @@ components:
             type: "string"
             format: "uuid"
       additionalProperties: false
+    ProductCreate:
+      description: "ProductInput with the fields a new product needs; PATCH takes ProductInput as is"
+      allOf:
+        - "$ref": "#/components/schemas/ProductInput"
+        - required:
+            - "name"
+            - "price"
     ProductPatch:
       description: "Either ProductInput fields, or a status change carrying only status and removalNote"
       oneOf:
@@ -2113,6 +2146,12 @@ components:
           type: "integer"
           format: "int64"
       additionalProperties: false
+    CategoryCreate:
+      description: "CategoryInput with the fields a new category needs; PATCH takes CategoryInput as is"
+      allOf:
+        - "$ref": "#/components/schemas/CategoryInput"
+        - required:
+            - "name"
     Demand:
       type: "object"
       properties:

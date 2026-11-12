@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/checkout"
@@ -32,6 +33,22 @@ func simple(f func(ctx context.Context) error) func(context.Context, repository.
 	return func(ctx context.Context, _ repository.JobState) (string, error) { return "", f(ctx) }
 }
 
+// treasuryRefresher forces a treasury cross-check (checkout.TreasuryGuard).
+type treasuryRefresher interface {
+	Refresh(ctx context.Context) checkout.TreasuryState
+}
+
+// treasuryCheck runs the check and fails the job unless the pin matched, so
+// the saved job status agrees with the payment guard.
+func treasuryCheck(g treasuryRefresher) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		if state := g.Refresh(ctx); state != checkout.TreasuryOK {
+			return fmt.Errorf("treasury check: %s; payments paused", state)
+		}
+		return nil
+	}
+}
+
 // backgroundJobs is the job table (backend-spec §9).
 func backgroundJobs(cfg *Config, repo *repository.Store, svc *checkout.Service, ledger *coins.Client,
 	sender notifications.Sender, common notifications.Common) []jobs.Job {
@@ -41,10 +58,7 @@ func backgroundJobs(cfg *Config, repo *repository.Store, svc *checkout.Service, 
 	return []jobs.Job{
 		{Name: "outbox", Every: 15 * time.Second, Run: simple(outbox.Run)},
 		{Name: "payment-reconciler", Every: 30 * time.Second, Run: simple(jobs.PaymentReconciler(repo, svc, time.Now))},
-		{Name: "treasury-check", Every: 10 * time.Minute, Run: simple(func(ctx context.Context) error {
-			svc.Treasury().Refresh(ctx)
-			return nil
-		})},
+		{Name: "treasury-check", Every: 10 * time.Minute, Run: simple(treasuryCheck(svc.Treasury()))},
 		{Name: "treasury-reconcile", Daily: &jobs.Daily{Hour: 2, Loc: time.UTC}, Run: reconcile.Run},
 		{Name: "pickup-reminder", Every: time.Hour, Run: simple(func(ctx context.Context) error {
 			_, err := repo.RemindPickups(ctx, time.Now().Add(-days(cfg.PickupReminderDays)))

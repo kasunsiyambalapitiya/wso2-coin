@@ -17,6 +17,7 @@
 package main
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -47,11 +48,14 @@ func (m *mailbox) register(mux *http.ServeMux) {
 
 func (m *mailbox) handleSend(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		To       []string `json:"to"`
-		CC       []string `json:"cc"`
-		BCC      []string `json:"bcc"`
-		Subject  string   `json:"subject"`
-		Template []byte   `json:"template"` // base64 on the wire
+		To          []string          `json:"to"`
+		CC          []string          `json:"cc"`
+		BCC         []string          `json:"bcc"`
+		ReplyTo     []string          `json:"replyTo"`
+		From        string            `json:"from"`
+		Subject     string            `json:"subject"`
+		Template    []byte            `json:"template"` // base64 on the wire
+		Attachments []json.RawMessage `json:"attachments"`
 	}
 	if err := readJSON(r, 32<<20, &req); err != nil {
 		writeMessage(w, http.StatusBadRequest, "Invalid request body.")

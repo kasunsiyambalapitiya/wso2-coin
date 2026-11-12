@@ -19,7 +19,9 @@ package repository_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -319,4 +321,109 @@ func TestAuditEventWithoutDetailReads(t *testing.T) {
 		}
 	}
 	t.Fatal("category_deleted event missing")
+}
+
+// Two edits of different fields must not undo each other: the second patch
+// waits for the first one's row lock and sees its change.
+func TestUpdateProductPatchesTheLockedRow(t *testing.T) {
+	f := newFixture(t, 0)
+	ctx := context.Background()
+	holding, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	first := make(chan error, 1)
+	go func() {
+		_, err := f.s.UpdateProduct(ctx, admin, f.productID, func(in *repository.ProductInput) error {
+			in.Price = 95
+			once.Do(func() { close(holding) })
+			<-release
+			return nil
+		})
+		first <- err
+	}()
+	<-holding
+	second := make(chan error, 1)
+	var seenPrice int64
+	go func() {
+		_, err := f.s.UpdateProduct(ctx, admin, f.productID, func(in *repository.ProductInput) error {
+			seenPrice = in.Price
+			in.Name = "WSO2 Hoodie v2"
+			return nil
+		})
+		second <- err
+	}()
+	time.Sleep(200 * time.Millisecond) // the second edit is now waiting for the row lock
+	close(release)
+	if err := <-first; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-second; err != nil {
+		t.Fatal(err)
+	}
+	d, err := f.s.ProductByID(ctx, f.productID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seenPrice != 95 || d.Product.Price != 95 || d.Product.Name != "WSO2 Hoodie v2" {
+		t.Fatalf("second patch saw price %d; product = %q at %d, want both edits", seenPrice, d.Product.Name, d.Product.Price)
+	}
+}
+
+func TestUpdateProductPatchErrorWritesNothing(t *testing.T) {
+	f := newFixture(t, 0)
+	ctx := context.Background()
+	invalid := errors.New("invalid")
+	_, err := f.s.UpdateProduct(ctx, admin, f.productID, func(in *repository.ProductInput) error {
+		in.Price = 1
+		return invalid
+	})
+	if !errors.Is(err, invalid) {
+		t.Fatalf("err = %v, want the patch error", err)
+	}
+	if d, _ := f.s.ProductByID(ctx, f.productID); d.Product.Price != 90 {
+		t.Fatalf("price = %d after a failed patch", d.Product.Price)
+	}
+	if _, err := f.s.UpdateProduct(ctx, admin, uuid.NewString(), func(*repository.ProductInput) error { return nil }); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("unknown product: err = %v", err)
+	}
+}
+
+// A variant always costs at least 1 coin: price + priceDelta >= 1, whether the
+// variant or the product price changes.
+func TestVariantPriceStaysPositive(t *testing.T) {
+	f := newFixture(t, 0)
+	ctx := context.Background()
+	delta := func(d int64) repository.VariantInput { return repository.VariantInput{PriceDelta: &d} }
+	if err := f.s.UpdateVariant(ctx, admin, f.productID, f.variantID, delta(-90)); !errors.Is(err, repository.ErrPriceTooLow) {
+		t.Fatalf("delta -90 on a 90-coin product: err = %v, want ErrPriceTooLow", err)
+	}
+	if err := f.s.UpdateVariant(ctx, admin, f.productID, f.variantID, delta(-89)); err != nil {
+		t.Fatalf("delta -89: %v", err)
+	}
+	_, err := f.s.UpdateProduct(ctx, admin, f.productID, func(in *repository.ProductInput) error { in.Price = 89; return nil })
+	if !errors.Is(err, repository.ErrPriceTooLow) {
+		t.Fatalf("price 89 with delta -89: err = %v, want ErrPriceTooLow", err)
+	}
+	if d, _ := f.s.ProductByID(ctx, f.productID); d.Product.Price != 90 || d.Variants[0].PriceDelta != -89 {
+		t.Fatalf("product = %d, delta = %d after the refused edits", d.Product.Price, d.Variants[0].PriceDelta)
+	}
+}
+
+// A job holds its lock connection while it runs and does its work on the
+// main pool, so a one-connection main pool must not stall it.
+func TestJobLockWorksWithAOneConnectionPool(t *testing.T) {
+	db := testdb.Open(t)
+	s := repository.New(db)
+	db.SetMaxOpenConns(1)
+	s.UseLockPool(testdb.SecondPool(t, db))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ran, err := s.WithJobLock(ctx, "stats", func(ctx context.Context) error {
+		if _, err := s.GetJobState(ctx, "stats"); err != nil {
+			return err
+		}
+		return s.SaveJobState(ctx, "stats", repository.JobState{Status: "ok"})
+	})
+	if !ran || err != nil {
+		t.Fatalf("ran = %v, err = %v", ran, err)
+	}
 }

@@ -38,7 +38,7 @@ type AdminCatalogStore interface {
 	SearchProducts(ctx context.Context, q repository.ProductQuery) ([]repository.ProductCard, int, error)
 	ProductByID(ctx context.Context, id string) (*repository.ProductDetail, error)
 	CreateProduct(ctx context.Context, a repository.Actor, in repository.ProductInput) (*repository.ProductDetail, error)
-	UpdateProduct(ctx context.Context, a repository.Actor, id string, in repository.ProductInput) (*repository.ProductDetail, error)
+	UpdateProduct(ctx context.Context, a repository.Actor, id string, patch func(*repository.ProductInput) error) (*repository.ProductDetail, error)
 	SetProductStatus(ctx context.Context, a repository.Actor, id, to, note string) error
 	DeleteDraft(ctx context.Context, a repository.Actor, id string) error
 	RemovalImpact(ctx context.Context, id string) (*repository.RemovalImpact, error)
@@ -81,6 +81,8 @@ func (h *AdminCatalogHandler) writeStoreError(c *gin.Context, msg string, err er
 		writeErrorCode(c, http.StatusConflict, "This is still in use.", CodeStateConflict)
 	case errors.Is(err, repository.ErrConflict):
 		writeErrorCode(c, http.StatusConflict, "That slug or SKU is already taken.", CodeStateConflict)
+	case errors.Is(err, repository.ErrPriceTooLow):
+		writeError(c, http.StatusBadRequest, "Every variant must cost at least 1 coin (price + priceDelta).")
 	default:
 		writeInternal(c, msg, err)
 	}
@@ -211,7 +213,7 @@ type productBody struct {
 }
 
 func (b *productBody) fieldsSet() bool {
-	return b.Name != nil || b.Slug != nil || b.Description != nil || b.CategoryID != nil || b.Price != nil ||
+	return b.Name != nil || b.Slug != nil || b.Description != nil || b.raw["categoryId"] != nil || b.Price != nil ||
 		b.RestockPolicy != nil || b.raw["maxPerUser"] != nil || b.raw["limitWindowDays"] != nil || b.Images != nil || b.Alternatives != nil
 }
 
@@ -229,8 +231,11 @@ func (h *AdminCatalogHandler) apply(b *productBody, in *repository.ProductInput)
 	if b.Description != nil {
 		in.Description = strings.TrimSpace(*b.Description)
 	}
-	if b.CategoryID != nil {
-		in.CategoryID = strings.ToLower(*b.CategoryID)
+	if _, ok := b.raw["categoryId"]; ok { // null clears the category
+		in.CategoryID = ""
+		if b.CategoryID != nil {
+			in.CategoryID = strings.ToLower(*b.CategoryID)
+		}
 	}
 	if b.Price != nil {
 		in.Price = *b.Price
@@ -372,27 +377,17 @@ func (h *AdminCatalogHandler) Patch(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "removalNote goes with a status change.")
 		return
 	}
-	cur, err := h.store.ProductByID(ctx, id)
-	if err != nil {
-		writeInternal(c, "admin products: read failed", err)
+	// The patch is applied to the row under its lock, so a concurrent edit of
+	// another field is kept.
+	var invalid error
+	d, err := h.store.UpdateProduct(ctx, actorOf(c), id, func(in *repository.ProductInput) error {
+		invalid = h.apply(b, in)
+		return invalid
+	})
+	if invalid != nil {
+		writeError(c, http.StatusBadRequest, invalid.Error())
 		return
 	}
-	if cur == nil {
-		writeError(c, http.StatusNotFound, ErrMsgNotFound)
-		return
-	}
-	p := cur.Product
-	in := repository.ProductInput{Name: p.Name, Slug: p.Slug, Description: p.Description, CategoryID: p.CategoryID,
-		Price: p.Price, RestockPolicy: p.RestockPolicy, MaxPerUser: p.MaxPerUser, LimitWindowDays: p.LimitWindowDays}
-	for _, im := range cur.Images {
-		in.Images = append(in.Images, repository.ImageInput{URL: im.URL, Alt: im.Alt})
-	}
-	in.Alternatives = append(in.Alternatives, cur.CuratedAlternativeIDs...)
-	if err := h.apply(b, &in); err != nil {
-		writeError(c, http.StatusBadRequest, err.Error())
-		return
-	}
-	d, err := h.store.UpdateProduct(ctx, actorOf(c), id, in)
 	if err != nil {
 		h.writeStoreError(c, "admin products: update failed", err)
 		return

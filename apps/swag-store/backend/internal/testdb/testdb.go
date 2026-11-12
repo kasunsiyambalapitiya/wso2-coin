@@ -25,6 +25,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -81,7 +82,9 @@ func OpenEmpty(t testing.TB) *sql.DB {
 		t.Fatal(err)
 	}
 	db.SetMaxOpenConns(40)
+	dsns.Store(db, cfg.FormatDSN())
 	t.Cleanup(func() {
+		dsns.Delete(db)
 		_ = db.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -89,6 +92,26 @@ func OpenEmpty(t testing.TB) *sql.DB {
 		_ = adminDB.Close()
 	})
 	return db
+}
+
+// dsns maps each open test pool to its DSN, for SecondPool.
+var dsns sync.Map
+
+// SecondPool opens another connection pool on db's test database, for code
+// that keeps connections apart from the main pool (the job lock pool). It is
+// closed before the database is dropped.
+func SecondPool(t testing.TB, db *sql.DB) *sql.DB {
+	t.Helper()
+	dsn, ok := dsns.Load(db)
+	if !ok {
+		t.Fatal("testdb: SecondPool needs a pool from Open or OpenEmpty")
+	}
+	other, err := sql.Open("mysql", dsn.(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Close() })
+	return other
 }
 
 // Open returns a fresh database with every migration applied.

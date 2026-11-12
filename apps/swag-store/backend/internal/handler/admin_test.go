@@ -127,6 +127,7 @@ type fakeAdminCatalog struct {
 	updated   *repository.ProductInput
 	created   *repository.ProductInput
 	moveErr   error
+	updateErr error // UpdateProduct and UpdateVariant
 }
 
 func (f *fakeAdminCatalog) SearchProducts(context.Context, repository.ProductQuery) ([]repository.ProductCard, int, error) {
@@ -139,7 +140,26 @@ func (f *fakeAdminCatalog) CreateProduct(_ context.Context, _ repository.Actor, 
 	f.created = &in
 	return &repository.ProductDetail{Product: repository.Product{ID: pid, Name: in.Name, Slug: in.Slug, Status: "DRAFT"}}, nil
 }
-func (f *fakeAdminCatalog) UpdateProduct(_ context.Context, _ repository.Actor, _ string, in repository.ProductInput) (*repository.ProductDetail, error) {
+
+// UpdateProduct patches the stored detail the way the repository does under
+// its row lock: every field, the images and the curated alternatives.
+func (f *fakeAdminCatalog) UpdateProduct(_ context.Context, _ repository.Actor, _ string, patch func(*repository.ProductInput) error) (*repository.ProductDetail, error) {
+	if f.detail == nil {
+		return nil, repository.ErrNotFound
+	}
+	p := f.detail.Product
+	in := repository.ProductInput{Name: p.Name, Slug: p.Slug, Description: p.Description, CategoryID: p.CategoryID,
+		Price: p.Price, RestockPolicy: p.RestockPolicy, MaxPerUser: p.MaxPerUser, LimitWindowDays: p.LimitWindowDays,
+		Alternatives: append([]string(nil), f.detail.CuratedAlternativeIDs...)}
+	for _, im := range f.detail.Images {
+		in.Images = append(in.Images, repository.ImageInput{URL: im.URL, Alt: im.Alt})
+	}
+	if err := patch(&in); err != nil {
+		return nil, err
+	}
+	if f.updateErr != nil {
+		return nil, f.updateErr
+	}
 	f.updated = &in
 	return f.detail, nil
 }
@@ -155,7 +175,7 @@ func (f *fakeAdminCatalog) SetOptions(context.Context, repository.Actor, string,
 	return f.detail, nil
 }
 func (f *fakeAdminCatalog) UpdateVariant(context.Context, repository.Actor, string, string, repository.VariantInput) error {
-	return nil
+	return f.updateErr
 }
 func (f *fakeAdminCatalog) RecordStockMovement(context.Context, repository.Actor, string, string, int, string) (*repository.StockResult, error) {
 	return &repository.StockResult{Free: 3}, f.moveErr
@@ -374,5 +394,43 @@ func TestFieldPatchKeepsCuratedAlternativesOnly(t *testing.T) {
 	rec := do(testRouter(catalogAdmin, http.MethodPatch, "/admin/products/:id", h.Patch), http.MethodPatch, "/admin/products/"+pid, `{"price":95}`)
 	if rec.Code != 200 || len(f.updated.Alternatives) != 1 || f.updated.Alternatives[0] != "0192f3a4-0000-7000-8000-0000000000e2" {
 		t.Fatalf("alternatives = %v", f.updated.Alternatives)
+	}
+}
+
+func TestFieldPatchNullCategoryClearsIt(t *testing.T) {
+	d := activeDetail()
+	d.Product.CategoryID = "0192f3a4-0000-7000-8000-0000000000c1"
+	f := &fakeAdminCatalog{detail: d}
+	r := testRouter(catalogAdmin, http.MethodPatch, "/admin/products/:id", adminCatalog(f, NewListCache()).Patch)
+	if rec := do(r, http.MethodPatch, "/admin/products/"+pid, `{"price":95}`); rec.Code != 200 || f.updated.CategoryID != d.Product.CategoryID {
+		t.Fatalf("absent categoryId = %d, category %q, want it kept", rec.Code, f.updated.CategoryID)
+	}
+	if rec := do(r, http.MethodPatch, "/admin/products/"+pid, `{"categoryId":null}`); rec.Code != 200 || f.updated.CategoryID != "" {
+		t.Fatalf("categoryId null = %d, category %q, want it cleared", rec.Code, f.updated.CategoryID)
+	}
+	if rec := do(r, http.MethodPatch, "/admin/products/"+pid, `{"status":"ACTIVE","categoryId":null}`); rec.Code != 400 {
+		t.Fatalf("status with categoryId null = %d, want 400", rec.Code)
+	}
+}
+
+func TestPriceTooLowIsABadRequest(t *testing.T) {
+	f := &fakeAdminCatalog{detail: activeDetail(), updateErr: repository.ErrPriceTooLow}
+	h := adminCatalog(f, NewListCache())
+	if rec := do(testRouter(catalogAdmin, http.MethodPatch, "/admin/products/:id", h.Patch), http.MethodPatch, "/admin/products/"+pid, `{"price":1}`); rec.Code != 400 {
+		t.Fatalf("product patch = %d %s, want 400", rec.Code, rec.Body)
+	}
+	vid := "0192f3a4-0000-7000-8000-0000000000d1"
+	rec := do(testRouter(catalogAdmin, http.MethodPatch, "/admin/products/:id/variants/:variantId", h.PatchVariant),
+		http.MethodPatch, "/admin/products/"+pid+"/variants/"+vid, `{"priceDelta":-90}`)
+	if rec.Code != 400 {
+		t.Fatalf("variant patch = %d %s, want 400", rec.Code, rec.Body)
+	}
+}
+
+func TestFieldPatchOfUnknownProductIs404(t *testing.T) {
+	f := &fakeAdminCatalog{}
+	rec := do(testRouter(catalogAdmin, http.MethodPatch, "/admin/products/:id", adminCatalog(f, NewListCache()).Patch), http.MethodPatch, "/admin/products/"+pid, `{"price":95}`)
+	if rec.Code != 404 {
+		t.Fatalf("= %d, want 404", rec.Code)
 	}
 }

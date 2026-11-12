@@ -77,3 +77,30 @@ func TestHealth(t *testing.T) {
 		t.Errorf("status = %d", status)
 	}
 }
+
+func TestFakesRejectUnknownFields(t *testing.T) {
+	srv := newTestServer(t)
+	cases := []struct {
+		path string
+		body map[string]any
+	}{
+		{"/graphql", map[string]any{"query": "query employee", "variables": map[string]any{"emali": "a@wso2.com"}}},
+		{"/send-email", map[string]any{"to": []string{"a@wso2.com"}, "subject": "S", "template": []byte("x"), "bodyy": "x"}},
+		{"/payments", map[string]any{"fromAddress": "0x1", "toAddress": testTreasury, "amount": "1", "reference": "swag:ord:SS-9", "source": "SWAG_STORE", "memo": "x"}},
+		{"/transactions/search", map[string]any{"toAdresses": []string{testTreasury}}},
+	}
+	for _, tc := range cases {
+		if status, body := call(t, srv, http.MethodPost, tc.path, tc.body, "nimal@wso2.com"); status != http.StatusBadRequest {
+			t.Errorf("%s with an unknown field = %d %s, want 400", tc.path, status, body)
+		}
+	}
+	// Every field the real email client sends is accepted.
+	status, body := call(t, srv, http.MethodPost, "/send-email", map[string]any{
+		"to": []string{"a@wso2.com"}, "cc": []string{}, "bcc": []string{}, "replyTo": []string{"store@wso2.com"},
+		"from": "store@wso2.com", "subject": "S", "template": []byte("x"),
+		"attachments": []map[string]any{{"contentName": "a.pdf", "contentType": "application/pdf", "attachment": []byte("%PDF")}},
+	}, "")
+	if status != http.StatusOK {
+		t.Errorf("full client request = %d %s, want 200", status, body)
+	}
+}

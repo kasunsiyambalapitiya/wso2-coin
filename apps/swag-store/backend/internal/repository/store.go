@@ -43,17 +43,24 @@ const (
 // txRetries is how often a transaction is retried after a deadlock.
 const txRetries = 3
 
-// Store is the repository over one connection pool.
+// Store is the repository over one connection pool, plus the pool its job
+// locks use.
 type Store struct {
-	db  *sql.DB
-	q   *store.Queries
-	now func() time.Time
+	db    *sql.DB
+	locks *sql.DB // job locks; db until UseLockPool
+	q     *store.Queries
+	now   func() time.Time
 }
 
 // New wraps db.
 func New(db *sql.DB) *Store {
-	return &Store{db: db, q: store.New(db), now: time.Now}
+	return &Store{db: db, locks: db, q: store.New(db), now: time.Now}
 }
+
+// UseLockPool takes job locks on connections from pool instead of the main
+// pool. A job holds its lock connection while it runs and does its work on
+// the main pool, so with one pool a small DB_MAX_OPEN_CONNS stalls the jobs.
+func (s *Store) UseLockPool(pool *sql.DB) { s.locks = pool }
 
 // DB exposes the pool (health probe, job locks).
 func (s *Store) DB() *sql.DB { return s.db }

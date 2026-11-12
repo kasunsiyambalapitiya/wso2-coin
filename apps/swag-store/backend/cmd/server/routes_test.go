@@ -253,3 +253,18 @@ func TestRoutePermissionMatrix(t *testing.T) {
 		}
 	}
 }
+
+// Every write has a rate limit (CLAUDE.md "How to add an endpoint"). The
+// quote and the order search are POSTs that change nothing.
+func TestEveryWriteRouteIsRateLimited(t *testing.T) {
+	reads := map[string]bool{"POST /quotes": true, "POST /admin/orders/search": true}
+	for _, rt := range routeTable(&app{}) {
+		key := rt.Method + " " + rt.Path
+		if rt.Method == http.MethodGet || reads[key] {
+			continue
+		}
+		if rt.Limit == nil {
+			t.Errorf("%s has no rate limit", key)
+		}
+	}
+}

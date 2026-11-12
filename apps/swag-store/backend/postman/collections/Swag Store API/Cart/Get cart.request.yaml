@@ -6,9 +6,10 @@ scripts:
   code: |-
     pm.test('Status is 2xx', () => pm.expect(pm.response.code).to.be.within(200, 299));
     if (pm.response.code < 300) {
-      const json = pm.response.json();
-      const value = pm.collectionVariables.get('cartLineId') || ((json.lines || [])[0] || {}).id;
-      if (value) { pm.collectionVariables.set('cartLineId', value); }
+      const lines = pm.response.json().lines || [];
+      const stored = pm.collectionVariables.get('cartLineId');
+      const line = lines.find((l) => l.id === stored) || lines[0];
+      if (line) { pm.collectionVariables.set('cartLineId', line.id); } else { pm.collectionVariables.unset('cartLineId'); }
     }
   language: text/javascript
 order: 2000

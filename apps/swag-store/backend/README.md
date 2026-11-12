@@ -105,7 +105,7 @@ When a route changes, update `openapi.yaml` and the matching request file.
 | `AUTH_CATALOG_MANAGER_GROUPS` · `AUTH_FULFILMENT_OPS_GROUPS` | No (warns) | none | Token `groups` that grant each role |
 | `DATABASE_URL` or `DB_HOST` · `DB_PORT` · `DB_USER` · `DB_PASSWORD` · `DB_NAME` | Yes | port `3306` | MySQL. **(confirm)** the names Choreo injects for a database connection |
 | `DB_TLS` · `DB_CA_CERT` | No | `true` · none | TLS to MySQL; PEM for a private CA (`\n` allowed) |
-| `DB_MAX_OPEN_CONNS` | No | `10` | Pool size; idle = half |
+| `DB_MAX_OPEN_CONNS` | No | `10` | Pool size; idle = half. Job locks use a second pool of one connection per job (8) |
 | `OAUTH2_CLIENT_ID` · `OAUTH2_CLIENT_SECRET` · `OAUTH2_TOKEN_URL` | Yes | — | Shared client-credentials app (secret in a Choreo secret) |
 | `TRANSACTION_SERVICE_BASE_URL` · `_SCOPES` | URL yes | — | wso2-coin transaction-service |
 | `HR_ENTITY_BASE_URL` · `_SCOPES` | URL yes | — | HR Entity GraphQL endpoint |

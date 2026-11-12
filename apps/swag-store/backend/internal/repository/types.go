@@ -38,6 +38,7 @@ var (
 	ErrStateConflict = errors.New("state changed in the meantime")
 	ErrInUse         = errors.New("row is still referenced")
 	ErrConflict      = errors.New("unique value already taken")
+	ErrPriceTooLow   = errors.New("a variant would cost less than 1 coin")
 )
 
 // CartItem is one cart line with everything the quote rules and the cart view need.

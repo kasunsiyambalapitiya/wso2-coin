@@ -274,3 +274,15 @@ func TestSearchByToAddresses(t *testing.T) {
 		t.Errorf("bad dateFrom = %d, want 400", status)
 	}
 }
+
+func TestPaymentToAWalletBeforeItsOwnerArrivesIsKept(t *testing.T) {
+	srv := newTestServer(t)
+	from := wallets(t, srv, "alice@wso2.com")[0].WalletAddress
+	bob := walletAddress("bob@wso2.com", 0)
+	if status, body := call(t, srv, http.MethodPost, "/payments", pay(from, bob, "10", "swag:ord:SS-7"), "alice@wso2.com"); status != http.StatusCreated {
+		t.Fatalf("pay bob = %d %s", status, body)
+	}
+	if ws := wallets(t, srv, "bob@wso2.com"); ws[0].WalletAddress != bob || ws[0].Balance != "510" {
+		t.Fatalf("bob's wallets = %+v, want the starting 500 plus the 10 received", ws)
+	}
+}

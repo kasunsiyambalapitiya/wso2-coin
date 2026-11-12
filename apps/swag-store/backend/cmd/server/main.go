@@ -147,9 +147,21 @@ func run() error {
 
 	jobsCtx, stopJobs := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopJobs()
+	var runner *jobs.Runner
 	if cfg.JobsEnabled {
 		common := notifications.Common{StoreURL: cfg.WebURL, ContactEmail: cfg.ContactEmail, Timezone: cfg.Timezone}
-		jobs.NewRunner(repo).Start(jobsCtx, backgroundJobs(cfg, repo, svc, coinsClient, sender, common))
+		jobList := backgroundJobs(cfg, repo, svc, coinsClient, sender, common)
+		// Job locks get their own pool: a job holds its lock connection while
+		// it works on the main pool, which may be as small as one connection.
+		lockDB, err := openDB(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		defer lockDB.Close()
+		lockDB.SetMaxOpenConns(len(jobList))
+		repo.UseLockPool(lockDB)
+		runner = jobs.NewRunner(repo)
+		runner.Start(jobsCtx, jobList)
 	} else {
 		slog.Warn("JOBS_ENABLED=false: background jobs are off on this replica")
 	}
@@ -187,10 +199,14 @@ func run() error {
 	case <-ctx.Done():
 	}
 	slog.Info("shutting down")
-	stopJobs()
+	stopJobs() // no new job runs; the ones in progress go on
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	return srv.Shutdown(shutdownCtx)
+	err = srv.Shutdown(shutdownCtx)
+	if runner != nil {
+		runner.Stop(shutdownCtx) // within the same deadline
+	}
+	return err
 }
 
 func openDB(ctx context.Context, cfg *Config) (*sql.DB, error) {

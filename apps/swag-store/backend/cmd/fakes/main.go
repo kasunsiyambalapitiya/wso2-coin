@@ -130,10 +130,13 @@ func writeMessage(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"message": msg})
 }
 
-// readJSON decodes a request body of at most limit bytes. An empty body
-// leaves v as it is.
+// readJSON decodes a request body of at most limit bytes and refuses unknown
+// fields, so a client that drifts from the contract fails locally. An empty
+// body leaves v as it is.
 func readJSON(r *http.Request, limit int64, v any) error {
-	err := json.NewDecoder(io.LimitReader(r.Body, limit)).Decode(v)
+	dec := json.NewDecoder(io.LimitReader(r.Body, limit))
+	dec.DisallowUnknownFields()
+	err := dec.Decode(v)
 	if errors.Is(err, io.EOF) {
 		return nil
 	}

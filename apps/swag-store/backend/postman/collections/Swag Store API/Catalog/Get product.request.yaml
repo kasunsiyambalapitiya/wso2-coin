@@ -10,6 +10,9 @@ scripts:
   code: |-
     pm.test('Status is 2xx', () => pm.expect(pm.response.code).to.be.within(200, 299));
     if (pm.response.code < 300) {
+      // Never keep another product's variant ids.
+      pm.collectionVariables.unset('variantId');
+      pm.collectionVariables.unset('alertVariantId');
       const variants = pm.response.json().variants || [];
       const buyable = variants.find((v) => v.availability === 'IN_STOCK' || v.availability === 'LOW_STOCK');
       const waiting = variants.find((v) => v.availability === 'OUT_OF_STOCK');

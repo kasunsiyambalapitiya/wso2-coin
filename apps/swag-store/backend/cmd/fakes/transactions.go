@@ -262,7 +262,8 @@ func (l *ledger) handleMasterBalance(w http.ResponseWriter, _ *http.Request) {
 }
 
 // walletsOf returns the user's wallets, default first, creating them on first
-// sight. The caller holds mu.
+// sight. A payment received before that is kept on top of the starting
+// balance. The caller holds mu.
 func (l *ledger) walletsOf(email string) []string {
 	if addrs, ok := l.owned[email]; ok {
 		return addrs
@@ -271,6 +272,9 @@ func (l *ledger) walletsOf(email string) []string {
 	for i, bal := range startingBalances {
 		addr := walletAddress(email, i)
 		b, _ := new(big.Rat).SetString(bal)
+		if received := l.balances[addr]; received != nil {
+			b.Add(b, received)
+		}
 		l.balances[addr] = b
 		addrs = append(addrs, addr)
 	}

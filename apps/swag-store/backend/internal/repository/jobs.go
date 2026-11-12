@@ -203,9 +203,9 @@ func (s *Store) SaveJobState(ctx context.Context, job string, st JobState) error
 }
 
 // WithJobLock runs fn only if this replica gets GET_LOCK('swag:job:<name>', 0)
-// on a dedicated connection; otherwise it returns (false, nil).
+// on a dedicated connection from the lock pool; otherwise it returns (false, nil).
 func (s *Store) WithJobLock(ctx context.Context, name string, fn func(ctx context.Context) error) (bool, error) {
-	conn, err := s.db.Conn(ctx)
+	conn, err := s.locks.Conn(ctx)
 	if err != nil {
 		return false, err
 	}

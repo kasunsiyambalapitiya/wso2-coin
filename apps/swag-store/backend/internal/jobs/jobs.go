@@ -22,9 +22,13 @@ package jobs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
+	"sync"
 	"time"
 
+	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/apierror"
 	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/checkout"
 	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/coins"
 	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/notifications"
@@ -40,12 +44,26 @@ type Daily struct {
 
 // Last is the most recent scheduled time at or before now.
 func (d Daily) Last(now time.Time) time.Time {
-	n := now.In(d.Loc)
-	t := time.Date(n.Year(), n.Month(), n.Day(), d.Hour, d.Minute, 0, 0, d.Loc)
-	if t.After(n) {
+	t := d.today(now)
+	if t.After(now) {
 		t = t.AddDate(0, 0, -1)
 	}
 	return t
+}
+
+// today is the scheduled time on now's day.
+func (d Daily) today(now time.Time) time.Time {
+	n := now.In(d.Loc)
+	return time.Date(n.Year(), n.Month(), n.Day(), d.Hour, d.Minute, 0, 0, d.Loc)
+}
+
+// due reports whether a run is due at now. A job that has never run waits
+// for today's scheduled time, so its first run is a scheduled one.
+func (d Daily) due(lastRun *time.Time, now time.Time) bool {
+	if lastRun == nil {
+		return !d.today(now).After(now)
+	}
+	return lastRun.Before(d.Last(now))
 }
 
 // Job is one background job. Every is the tick; a Daily job checks each tick
@@ -67,21 +85,28 @@ type LockStore interface {
 
 // Runner starts and ticks the jobs.
 type Runner struct {
-	store LockStore
-	now   func() time.Time
+	store      LockStore
+	now        func() time.Time
+	running    sync.WaitGroup     // one per job goroutine
+	cancelRuns context.CancelFunc // cancels the runs in progress
 }
 
 // NewRunner builds a runner.
-func NewRunner(s LockStore) *Runner { return &Runner{store: s, now: time.Now} }
+func NewRunner(s LockStore) *Runner { return &Runner{store: s, now: time.Now, cancelRuns: func() {}} }
 
-// Start runs every job on its own goroutine until ctx is cancelled.
+// Start runs every job on its own goroutine until ctx is cancelled. A run in
+// progress when ctx is cancelled is not cut short; Stop waits for it.
 func (r *Runner) Start(ctx context.Context, jobs []Job) {
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	r.cancelRuns = cancel
 	for _, j := range jobs {
 		every := j.Every
 		if j.Daily != nil && every == 0 {
 			every = time.Minute
 		}
+		r.running.Add(1)
 		go func(j Job) {
+			defer r.running.Done()
 			t := time.NewTicker(every)
 			defer t.Stop()
 			for {
@@ -89,11 +114,31 @@ func (r *Runner) Start(ctx context.Context, jobs []Job) {
 				case <-ctx.Done():
 					return
 				case <-t.C:
-					r.tick(ctx, j)
+					if ctx.Err() != nil {
+						return
+					}
+					r.tick(runCtx, j)
 				}
 			}
 		}(j)
 	}
+}
+
+// Stop is called after Start's ctx is cancelled. It waits for the runs in
+// progress to finish, so an outbox send can record that it was sent. When
+// ctx ends first, it cancels those runs and returns.
+func (r *Runner) Stop(ctx context.Context) {
+	done := make(chan struct{})
+	go func() {
+		r.running.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		slog.WarnContext(ctx, "jobs still running at the shutdown deadline; cancelling them")
+	}
+	r.cancelRuns()
 }
 
 func (r *Runner) tick(ctx context.Context, j Job) {
@@ -108,7 +153,7 @@ func (r *Runner) tick(ctx context.Context, j Job) {
 			return err
 		}
 		now := r.now()
-		if j.Daily != nil && st.LastRunAt != nil && !st.LastRunAt.Before(j.Daily.Last(now)) {
+		if j.Daily != nil && !j.Daily.due(st.LastRunAt, now) {
 			return errSkip
 		}
 		cursor, runErr := j.Run(ctx, st)
@@ -184,15 +229,16 @@ func (o *Outbox) Run(ctx context.Context) error {
 		}
 		if err := o.sender.SendEmail(ctx, []string{e.To}, nil, nil, replyTo, r.Subject, r.HTML, nil); err != nil {
 			attempt := e.Attempts + 1
+			reason := sendFailure(err)
 			if attempt > len(retryBackoff) {
-				slog.ErrorContext(ctx, "outbox_failed", "id", e.ID, "template", e.Template, "attempts", attempt, "err", err)
-				if err := o.store.EmailFailed(ctx, e.ID, err.Error()); err != nil {
+				slog.ErrorContext(ctx, "outbox_failed", "id", e.ID, "template", e.Template, "attempts", attempt, "err", reason)
+				if err := o.store.EmailFailed(ctx, e.ID, reason); err != nil {
 					return err
 				}
 				continue
 			}
-			slog.WarnContext(ctx, "outbox send failed; will retry", "id", e.ID, "attempt", attempt, "err", err)
-			if err := o.store.EmailRetry(ctx, e.ID, o.now().Add(retryBackoff[attempt-1]), err.Error()); err != nil {
+			slog.WarnContext(ctx, "outbox send failed; will retry", "id", e.ID, "attempt", attempt, "err", reason)
+			if err := o.store.EmailRetry(ctx, e.ID, o.now().Add(retryBackoff[attempt-1]), reason); err != nil {
 				return err
 			}
 			continue
@@ -203,6 +249,19 @@ func (o *Outbox) Run(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// sendFailure is what the outbox logs and keeps for a failed send: the
+// email-service status, never its body, which can name a recipient.
+func sendFailure(err error) string {
+	switch status := apierror.Status(err); {
+	case status != 0:
+		return fmt.Sprintf("email-service returned %d", status)
+	case errors.Is(err, context.DeadlineExceeded):
+		return "email-service timed out"
+	default:
+		return "email-service request failed"
+	}
 }
 
 // --- payment reconciler ---
@@ -270,8 +329,8 @@ type TreasuryStore interface {
 }
 
 // TreasuryReconcile matches every swag:ord: inflow into the pinned treasury
-// to its order (backend-spec §9). It searches the pin only, so a payment that
-// went anywhere else can never confirm an order.
+// to its order (backend-spec §9). It searches the pin only and checks each
+// payee again, so a payment that went anywhere else can never confirm an order.
 type TreasuryReconcile struct {
 	ledger  Ledger
 	store   TreasuryStore
@@ -286,6 +345,7 @@ func NewTreasuryReconcile(l Ledger, s TreasuryStore, p PendingReconciler, pin st
 
 const (
 	reconcilePage     = 100
+	reconcilePages    = 50 // 5,000 inflows a night at most
 	reconcileLookback = 48 * time.Hour
 )
 
@@ -298,7 +358,7 @@ func (t *TreasuryReconcile) Run(ctx context.Context, st repository.JobState) (st
 	if c, err := time.Parse(time.RFC3339, st.Cursor); err == nil {
 		cursor = c.Add(-reconcileLookback).UTC().Format(time.RFC3339)
 	}
-	for offset, pages := 0, 0; pages < 50; pages++ {
+	for offset, pages := 0, 0; ; pages++ {
 		page, err := t.ledger.Search(ctx, coins.SearchFilter{ToAddresses: []string{t.pin}, DateFrom: cursor, Limit: reconcilePage, Offset: offset})
 		if err != nil {
 			return newest, err
@@ -313,16 +373,26 @@ func (t *TreasuryReconcile) Run(ctx context.Context, st repository.JobState) (st
 		}
 		offset += len(page.Transactions)
 		if len(page.Transactions) == 0 || offset >= page.Total {
-			break
+			return newest, nil
+		}
+		if pages+1 == reconcilePages {
+			// Matching is idempotent, but the cursor must not pass inflows
+			// that were never read: fail, so it stays and the job shows it.
+			return newest, fmt.Errorf("treasury reconcile stopped after %d pages with %d of %d inflows read", reconcilePages, offset, page.Total)
 		}
 	}
-	return newest, nil
 }
 
 func (t *TreasuryReconcile) match(ctx context.Context, tx coins.Transaction) error {
 	id, ok := orders.OrderIDFromReference(tx.Reference)
 	if !ok {
 		return nil // not a store payment
+	}
+	if !strings.EqualFold(strings.TrimSpace(tx.ToAddress), t.pin) {
+		// The search names the pin, but a payment confirms only after its
+		// own payee is checked (as checkout.Service.matches does).
+		slog.ErrorContext(ctx, "reconcile_result", "result", "payee_mismatch", "reference", tx.Reference)
+		return nil
 	}
 	o, err := t.store.OrderByID(ctx, id)
 	if err != nil {

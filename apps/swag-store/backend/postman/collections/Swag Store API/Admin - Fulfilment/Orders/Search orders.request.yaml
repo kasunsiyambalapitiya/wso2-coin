@@ -12,8 +12,8 @@ body:
         "status": "CONFIRMED",
         "pickupOfficeId": "{{pickupOfficeId}}",
         "searchQuery": "",
-        "from": "2026-11-01",
-        "to": "2026-12-31"
+        "from": "{{searchFrom}}",
+        "to": "{{searchTo}}"
       },
       "pagination": {
         "limit": 50,
@@ -21,6 +21,13 @@ body:
       }
     }
 scripts:
+- type: beforeRequest
+  code: |-
+    // The last 30 days up to tomorrow (UTC), so orders placed by this run are found.
+    const day = (offset) => new Date(Date.now() + offset * 86400000).toISOString().slice(0, 10);
+    pm.variables.set('searchFrom', day(-30));
+    pm.variables.set('searchTo', day(1));
+  language: text/javascript
 - type: afterResponse
   code: |-
     pm.test('Status is 2xx', () => pm.expect(pm.response.code).to.be.within(200, 299));

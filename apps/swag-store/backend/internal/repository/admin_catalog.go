@@ -110,13 +110,28 @@ func (s *Store) CreateProduct(ctx context.Context, a Actor, in ProductInput) (*P
 	return s.ProductByID(ctx, id)
 }
 
-// UpdateProduct edits the fields, images and alternatives.
-func (s *Store) UpdateProduct(ctx context.Context, a Actor, id string, in ProductInput) (*ProductDetail, error) {
+// UpdateProduct edits the fields, images and curated alternatives. patch gets
+// the product as it is under the row lock and changes it in place, so two
+// edits of different fields never undo each other. An error from patch is
+// returned as it is and nothing is written. patch may run again when the
+// transaction is retried.
+func (s *Store) UpdateProduct(ctx context.Context, a Actor, id string, patch func(*ProductInput) error) (*ProductDetail, error) {
 	err := s.inTx(ctx, func(q *store.Queries) error {
-		if _, err := q.LockProduct(ctx, id); err != nil {
+		p, err := q.LockProduct(ctx, id)
+		if err != nil {
 			return notFound(err)
 		}
-		_, err := q.UpdateProduct(ctx, store.UpdateProductParams{Slug: in.Slug, Name: in.Name, Description: in.Description,
+		in, err := inputOf(ctx, q, p)
+		if err != nil {
+			return err
+		}
+		if err := patch(&in); err != nil {
+			return err
+		}
+		if err := checkVariantPrices(ctx, q, id, in.Price); err != nil {
+			return err
+		}
+		_, err = q.UpdateProduct(ctx, store.UpdateProductParams{Slug: in.Slug, Name: in.Name, Description: in.Description,
 			CategoryID: nullStr(in.CategoryID), PriceCoins: in.Price, RestockPolicy: store.RestockPolicy(in.RestockPolicy),
 			MaxPerUser: nullInt(in.MaxPerUser), LimitWindowDays: nullInt(in.LimitWindowDays), ID: id})
 		if isDuplicate(err) {
@@ -137,6 +152,37 @@ func (s *Store) UpdateProduct(ctx context.Context, a Actor, id string, in Produc
 		return nil, err
 	}
 	return s.ProductByID(ctx, id)
+}
+
+// inputOf is the editable part of a locked product row.
+func inputOf(ctx context.Context, q *store.Queries, row store.Product) (ProductInput, error) {
+	p := productFrom(row)
+	in := ProductInput{Name: p.Name, Slug: p.Slug, Description: p.Description, CategoryID: p.CategoryID, Price: p.Price,
+		RestockPolicy: p.RestockPolicy, MaxPerUser: p.MaxPerUser, LimitWindowDays: p.LimitWindowDays}
+	images, err := q.ListImagesByProduct(ctx, p.ID)
+	if err != nil {
+		return in, err
+	}
+	for _, im := range images {
+		in.Images = append(in.Images, ImageInput{URL: im.Url, Alt: im.Alt})
+	}
+	in.Alternatives, err = q.ListAlternativeIDs(ctx, p.ID)
+	return in, err
+}
+
+// checkVariantPrices returns ErrPriceTooLow when a product price of price
+// would make any of its variants cost less than 1 coin.
+func checkVariantPrices(ctx context.Context, q *store.Queries, productID string, price int64) error {
+	variants, err := q.ListVariantsByProduct(ctx, productID)
+	if err != nil {
+		return err
+	}
+	for _, v := range variants {
+		if price+v.PriceDeltaCoins < 1 {
+			return ErrPriceTooLow
+		}
+	}
+	return nil
 }
 
 // SetProductStatus publishes (DRAFT→ACTIVE), removes (ACTIVE→REMOVED) or
@@ -434,9 +480,15 @@ type VariantInput struct {
 	ClearETA   bool
 }
 
-// UpdateVariant edits one variant of a product.
+// UpdateVariant edits one variant of a product. The product is locked first
+// (the order every writer uses), so a concurrent repricing cannot take the
+// variant below 1 coin.
 func (s *Store) UpdateVariant(ctx context.Context, a Actor, productID, variantID string, in VariantInput) error {
 	return s.inTx(ctx, func(q *store.Queries) error {
+		p, err := q.LockProduct(ctx, productID)
+		if err != nil {
+			return notFound(err)
+		}
 		v, err := q.LockVariant(ctx, variantID)
 		if err != nil || v.ProductID != productID {
 			if err == nil {
@@ -458,6 +510,9 @@ func (s *Store) UpdateVariant(ctx context.Context, a Actor, productID, variantID
 		}
 		if in.ClearETA {
 			v.RestockEta = sql.NullTime{}
+		}
+		if p.PriceCoins+v.PriceDeltaCoins < 1 {
+			return ErrPriceTooLow
 		}
 		_, err = q.UpdateVariant(ctx, store.UpdateVariantParams{Sku: v.Sku, PriceDeltaCoins: v.PriceDeltaCoins, Active: v.Active,
 			RestockEta: v.RestockEta, ID: variantID, ProductID: productID})

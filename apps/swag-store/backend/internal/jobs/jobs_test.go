@@ -17,12 +17,17 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/apierror"
 	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/coins"
 	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/notifications"
 	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/orders"
@@ -100,10 +105,11 @@ func TestRunnerTickLockAndDaily(t *testing.T) {
 }
 
 type fakeOutbox struct {
-	emails []repository.OutboxEmail
-	sent   []int64
-	retry  map[int64]time.Time
-	failed []int64
+	emails  []repository.OutboxEmail
+	sent    []int64
+	retry   map[int64]time.Time
+	failed  []int64
+	reasons []string // EmailRetry and EmailFailed
 }
 
 func (f *fakeOutbox) ClaimDueEmails(context.Context) ([]repository.OutboxEmail, error) {
@@ -113,12 +119,14 @@ func (f *fakeOutbox) EmailSent(_ context.Context, id int64) error {
 	f.sent = append(f.sent, id)
 	return nil
 }
-func (f *fakeOutbox) EmailRetry(_ context.Context, id int64, next time.Time, _ string) error {
+func (f *fakeOutbox) EmailRetry(_ context.Context, id int64, next time.Time, reason string) error {
 	f.retry[id] = next
+	f.reasons = append(f.reasons, reason)
 	return nil
 }
-func (f *fakeOutbox) EmailFailed(_ context.Context, id int64, _ string) error {
+func (f *fakeOutbox) EmailFailed(_ context.Context, id int64, reason string) error {
 	f.failed = append(f.failed, id)
+	f.reasons = append(f.reasons, reason)
 	return nil
 }
 
@@ -269,12 +277,12 @@ func TestTreasuryReconcile(t *testing.T) {
 		shortID:   {ID: shortID, Status: orders.Confirmed, Total: 70},
 	}}
 	ledger := &fakeLedger{pages: []*coins.TransactionPage{{Total: 6, Transactions: []coins.Transaction{
-		{Reference: orders.PaymentReference(failedID), Amount: "90", Timestamp: "2026-11-11T01:00:00Z"},
-		{Reference: orders.PaymentReference(pendingID), Amount: "40", Timestamp: "2026-11-11T01:10:00Z"},
-		{Reference: orders.PaymentReference(okID), Amount: "50", Timestamp: "2026-11-11T01:20:00Z"},
-		{Reference: orders.PaymentReference(shortID), Amount: "7", Timestamp: "2026-11-11T01:30:00Z"},
-		{Reference: orders.PaymentReference(ghostID), Amount: "10", Timestamp: "2026-11-11T01:40:00Z"},
-		{Reference: "0xabc", Amount: "10", Timestamp: "2026-11-11T01:50:00Z"},
+		{Reference: orders.PaymentReference(failedID), ToAddress: "0xTREASURY", Amount: "90", Timestamp: "2026-11-11T01:00:00Z"},
+		{Reference: orders.PaymentReference(pendingID), ToAddress: "0xtreasury", Amount: "40", Timestamp: "2026-11-11T01:10:00Z"},
+		{Reference: orders.PaymentReference(okID), ToAddress: "0xtreasury", Amount: "50", Timestamp: "2026-11-11T01:20:00Z"},
+		{Reference: orders.PaymentReference(shortID), ToAddress: "0xtreasury", Amount: "7", Timestamp: "2026-11-11T01:30:00Z"},
+		{Reference: orders.PaymentReference(ghostID), ToAddress: "0xtreasury", Amount: "10", Timestamp: "2026-11-11T01:40:00Z"},
+		{Reference: "0xabc", ToAddress: "0xtreasury", Amount: "10", Timestamp: "2026-11-11T01:50:00Z"},
 	}}}}
 	pend := &fakePendingReconciler{}
 	tr := NewTreasuryReconcile(ledger, st, pend, "0xtreasury")
@@ -330,5 +338,149 @@ func TestTreasuryReconcileLooksBack48Hours(t *testing.T) {
 	}
 	if cursor != "2026-11-10T02:00:00Z" {
 		t.Fatalf("an empty run moved the cursor: %s", cursor)
+	}
+}
+
+// A daily job that has never run waits for its hour, so its first run uses the
+// day's schedule (the low-stock digest's dedupe key is the day).
+func TestNewDailyJobWaitsForItsHour(t *testing.T) {
+	locks := &fakeLocks{}
+	now := time.Date(2026, 11, 11, 7, 0, 0, 0, time.UTC)
+	r := NewRunner(locks)
+	r.now = func() time.Time { return now }
+	runs := 0
+	job := Job{Name: "low-stock-digest", Daily: &Daily{Hour: 8, Loc: time.UTC},
+		Run: func(context.Context, repository.JobState) (string, error) { runs++; return "", nil }}
+	r.tick(context.Background(), job)
+	if runs != 0 {
+		t.Fatal("a new daily job ran before its hour")
+	}
+	now = time.Date(2026, 11, 11, 8, 0, 0, 0, time.UTC)
+	r.tick(context.Background(), job)
+	now = now.Add(time.Minute)
+	r.tick(context.Background(), job)
+	if runs != 1 {
+		t.Fatalf("runs = %d at and after 08:00, want 1", runs)
+	}
+}
+
+// Shutdown stops new runs but lets a run in progress finish, so an outbox
+// send can still mark its row sent.
+func TestRunnerStopLetsARunInProgressFinish(t *testing.T) {
+	r := NewRunner(&fakeLocks{})
+	started, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	runs := 0
+	var runErr error
+	job := Job{Name: "outbox", Every: time.Millisecond, Run: func(ctx context.Context, _ repository.JobState) (string, error) {
+		runs++
+		once.Do(func() { close(started); <-release; runErr = ctx.Err() })
+		return "", nil
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	r.Start(ctx, []Job{job})
+	<-started
+	cancel()
+	stopped := make(chan struct{})
+	go func() { r.Stop(context.Background()); close(stopped) }()
+	select {
+	case <-stopped:
+		t.Fatal("Stop returned while a run was in progress")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	<-stopped
+	if runErr != nil || runs != 1 {
+		t.Fatalf("run context err = %v, runs = %d; want the run to finish uncancelled and no new run", runErr, runs)
+	}
+}
+
+func TestRunnerStopCancelsRunsAtTheDeadline(t *testing.T) {
+	r := NewRunner(&fakeLocks{})
+	started, cancelled := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	job := Job{Name: "treasury-reconcile", Every: time.Millisecond, Run: func(ctx context.Context, _ repository.JobState) (string, error) {
+		once.Do(func() { close(started); <-ctx.Done(); close(cancelled) })
+		return "", ctx.Err()
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	r.Start(ctx, []Job{job})
+	<-started
+	cancel()
+	deadline, stop := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer stop()
+	r.Stop(deadline)
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("the run was not cancelled after the shutdown deadline")
+	}
+}
+
+// An email-service error body can name a recipient, so only the status is
+// logged and kept as the retry reason.
+func TestOutboxKeepsUpstreamBodiesOutOfLogsAndReasons(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(prev)
+
+	store := &fakeOutbox{retry: map[int64]time.Time{}, emails: []repository.OutboxEmail{
+		{ID: 1, Template: notifications.TemplateOrderConfirmed, To: "you@wso2.com", Payload: orderPayload()},
+	}}
+	sender := &fakeSender{err: apierror.New(400, []byte(`{"message":"rejected recipient you@wso2.com"}`))}
+	o := NewOutbox(store, sender, notifications.Common{StoreURL: "https://one.example"}, "")
+	_ = o.Run(context.Background())
+	store.emails[0].Attempts = len(retryBackoff) // the final failure path
+	_ = o.Run(context.Background())
+	if len(store.reasons) != 2 {
+		t.Fatalf("reasons = %v", store.reasons)
+	}
+	for _, r := range store.reasons {
+		if r != "email-service returned 400" {
+			t.Errorf("reason = %q, want the status only", r)
+		}
+	}
+	if strings.Contains(logs.String(), "@") || strings.Contains(logs.String(), "rejected") {
+		t.Errorf("log has the upstream body: %s", logs.String())
+	}
+}
+
+// When the page cap stops the scan with inflows left, the run fails, so the
+// cursor stays and the job status shows the gap.
+func TestTreasuryReconcileFailsWhenThePageCapLeavesInflows(t *testing.T) {
+	ledger := &fakeLedger{}
+	for p := range 50 {
+		page := &coins.TransactionPage{Total: 6000}
+		for i := range reconcilePage {
+			page.Transactions = append(page.Transactions, coins.Transaction{Reference: fmt.Sprintf("0x%d-%d", p, i),
+				ToAddress: "0xtreasury", Amount: "1", Timestamp: "2026-11-11T01:00:00Z"})
+		}
+		ledger.pages = append(ledger.pages, page)
+	}
+	tr := NewTreasuryReconcile(ledger, &fakeTreasuryStore{flags: map[string]string{}}, &fakePendingReconciler{}, "0xtreasury")
+	if _, err := tr.Run(context.Background(), repository.JobState{Cursor: "2026-11-10T02:00:00Z"}); err == nil {
+		t.Fatal("a scan stopped by the page cap reported success")
+	}
+	if len(ledger.filters) != 50 {
+		t.Fatalf("pages read = %d, want the cap of 50", len(ledger.filters))
+	}
+}
+
+// A store reference paid to any address but the pin never confirms an order.
+func TestTreasuryReconcileChecksThePayee(t *testing.T) {
+	const failedID = "0192f3a4-0000-7000-8000-000000000011"
+	st := &fakeTreasuryStore{flags: map[string]string{}, orders: map[string]*repository.Order{
+		failedID: {ID: failedID, Status: orders.Failed, Total: 90},
+	}}
+	ledger := &fakeLedger{pages: []*coins.TransactionPage{{Total: 1, Transactions: []coins.Transaction{
+		{Reference: orders.PaymentReference(failedID), ToAddress: "0xelsewhere", Amount: "90", Timestamp: "2026-11-11T01:00:00Z"},
+	}}}}
+	tr := NewTreasuryReconcile(ledger, st, &fakePendingReconciler{}, "0xtreasury")
+	if _, err := tr.Run(context.Background(), repository.JobState{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(st.late) != 0 {
+		t.Fatalf("a payment to another address confirmed %v", st.late)
 	}
 }
