@@ -1,0 +1,13 @@
+$kind: http-request
+description: Carts, open orders and alerts that removing the product would touch.
+method: GET
+url: '{{baseUrl}}/admin/products/:id/removal-impact'
+pathVariables:
+- key: id
+  value: '{{adminProductId}}'
+scripts:
+- type: afterResponse
+  code: |-
+    pm.test('Status is 2xx', () => pm.expect(pm.response.code).to.be.within(200, 299));
+  language: text/javascript
+order: 8000

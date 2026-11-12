@@ -1,0 +1,10 @@
+$kind: http-request
+description: User, portal roles and HR status (canBuy).
+method: GET
+url: '{{baseUrl}}/users/me'
+scripts:
+- type: afterResponse
+  code: |-
+    pm.test('Status is 2xx', () => pm.expect(pm.response.code).to.be.within(200, 299));
+  language: text/javascript
+order: 1000

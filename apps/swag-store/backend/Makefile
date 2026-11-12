@@ -1,6 +1,6 @@
 BINARY := server
 
-.PHONY: all vet test test-integration build generate migrate lint clean
+.PHONY: all vet test test-integration build generate migrate seed fakes lint clean
 
 all: build
 
@@ -28,6 +28,12 @@ generate:
 # Reads DATABASE_URL, or DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME (DB_TLS=false locally).
 migrate:
 	go run ./cmd/migrate
+
+seed:
+	go run ./cmd/seed
+
+fakes:
+	go run ./cmd/fakes
 
 lint:
 	go vet ./...

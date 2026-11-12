@@ -1,0 +1,3 @@
+$kind: collection
+description: Notify me when an out-of-stock, restockable variant is back.
+order: 5000

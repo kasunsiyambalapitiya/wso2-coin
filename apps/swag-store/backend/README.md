@@ -1,9 +1,11 @@
 # Swag Store backend
 
-Go service for the WSO2 Swag Store: catalog, cart, coin checkout, office pickup and stock alerts.
-One WSO2 is its only client. It runs on Choreo and owns the MySQL database `hris_swag_store`.
+Go service for the WSO2 Swag Store: catalog, cart, coin checkout, office pickup, stock alerts and
+admin. One WSO2 is its only client. It runs on Choreo, owns the MySQL database `hris_swag_store`
+and runs its background jobs in-process.
 
-Spec: `wso2-coin/apps/swag-store/docs/backend-spec.md`.
+Spec: `wso2-coin/apps/swag-store/docs/backend-spec.md`. Conventions: [CLAUDE.md](CLAUDE.md).
+Pre-PR checklist: [review.md](review.md).
 
 ## Architecture
 
@@ -16,18 +18,23 @@ One WSO2 ──► Choreo gateway ──x-jwt-assertion──► Gin router
                           │           │
                           │           └──► repository ──► MySQL (sqlc in internal/store)
                           └──► hr (HR Entity GraphQL, 1 h cache)
+jobs (GET_LOCK per job): outbox → notifications (email-service), payment reconciler, treasury check
+and reconcile, pickup reminders, uncollected flag, stats, low-stock digest
 ```
 
 | Package | Role |
 |---|---|
-| `cmd/server` | Composition root: config, DB, clients, handlers, route table, shutdown |
+| `cmd/server` | Composition root: config, DB, clients, handlers, route table, jobs, shutdown |
 | `cmd/migrate` | `make migrate`: applies `migrations/*.sql` and records them |
+| `cmd/seed` | The 7 launch rewards and the pickup offices (idempotent) |
+| `cmd/fakes` | Local fakes of transaction-service, HR entity, email-service and a token endpoint |
 | `internal/middleware` | Gin middleware chain and per-user rate limits |
 | `internal/handler` | One file per resource, the access guard, request/response helpers |
 | `internal/checkout` | Quote, place order, retry, payment reconciliation, treasury guard |
 | `internal/repository` | Transactions over sqlc; stock via conditional UPDATEs; admin audit rows |
 | `internal/catalog`, `internal/orders` | Pure rules: availability, line checks, state machine |
 | `internal/coins`, `internal/hr`, `internal/notifications` | Upstream clients |
+| `internal/jobs` | Runner and jobs |
 
 ### Payments and the treasury
 
@@ -49,6 +56,8 @@ Requires Go 1.27.4 (the toolchain downloads it) and MySQL 8.4.
 cp .env.example .env
 docker run -d --name swag-mysql -e MYSQL_ROOT_PASSWORD=pw -e MYSQL_DATABASE=hris_swag_store -p 3306:3306 mysql:8.4
 DATABASE_URL='root:pw@tcp(127.0.0.1:3306)/hris_swag_store' make migrate
+DATABASE_URL='root:pw@tcp(127.0.0.1:3306)/hris_swag_store' make seed
+make fakes            # in another terminal: fakes on 127.0.0.1:8081
 go run ./cmd/server   # or: make build && ./server
 curl -H "x-jwt-assertion: $JWT" http://localhost:8080/users/me
 ```
@@ -56,6 +65,23 @@ curl -H "x-jwt-assertion: $JWT" http://localhost:8080/users/me
 The token needs `email`, `userid` and (for admin) `groups` claims. With
 `AUTH_TOKEN_VALIDATOR_ENABLED=false` any JWT shape is decoded without a signature check; startup refuses
 that unless every upstream is loopback.
+
+### Postman
+
+`postman/collections/Swag Store API` is a Postman v3 collection that covers every route (51 requests).
+Use it with the `Swag Store local` environment in `postman/environments`. With `mintLocalToken=true` and
+an empty `jwtAssertion`, the collection builds an unsigned token from `userEmail`, `userId` and
+`userGroups`, so it works only against a store started with `AUTH_TOKEN_VALIDATOR_ENABLED=false`.
+The folders are in end-to-end order: the Catalog Manager creates, publishes and stocks a product, the
+shopper buys it, and Fulfilment Ops hands it over. Responses fill the ids the next requests need, so a
+full run passes on a freshly seeded database (with the fakes) and can be repeated.
+
+```bash
+postman collection run "postman/collections/Swag Store API" -e "postman/environments/Swag Store local.environment.yaml"
+postman collection lint "postman/collections/Swag Store API"
+```
+
+When a route changes, update `openapi.yaml` and the matching request file.
 
 | Command | What it does |
 |---|---|
@@ -104,7 +130,11 @@ Every base URL must be `https` (loopback `http` is allowed). Malformed values st
 - **Shopper** (`PermAuthenticated`): `/users/me`, `/wallets`, `/categories`, `/products`, `/products/{slug}`,
   `/cart`, `/cart/summary`, `/cart/lines`, `/pickup-offices`, `/quotes`, `/orders`, `/orders/{orderNo}`,
   `/orders/{orderNo}/payments`, `/stock-alerts`.
-- **Fulfilment Ops**: `/admin/pickup-offices…`.
+- **Admin, either role**: `/admin/dashboard`, `/admin/audit-events`.
+- **Catalog Manager**: `/admin/products…`, `/admin/variants/{id}/stock-movements`, `/admin/categories…`,
+  `/admin/demand`.
+- **Fulfilment Ops**: `/admin/orders/search` (JSON or CSV), `/admin/orders/{orderNo}` (+ `/notes`),
+  `/admin/pickup-offices…`.
 - `GET /health` and `GET /health/dependencies` skip auth.
 
 ## Open items (confirm with the platform teams)
@@ -114,3 +144,4 @@ Every base URL must be `https` (loopback `http` is allowed). Malformed values st
 - The shared app's client id is mapped to the treasury wallet in `client_master_wallet`.
 - The Choreo Go buildpack offers Go 1.27 and builds `./cmd/server`.
 - email-service answers `GET /health` (used by `/health/dependencies`).
+- Launch catalog sizes, restock policies and the office list in `cmd/seed` (design Q11).

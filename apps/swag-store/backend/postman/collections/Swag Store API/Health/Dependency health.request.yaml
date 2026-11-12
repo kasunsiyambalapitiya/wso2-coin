@@ -1,0 +1,12 @@
+$kind: http-request
+description: 200 when every dependency is ok or not configured, 503 when one failed. Cached 10 s.
+method: GET
+url: '{{baseUrl}}/health/dependencies'
+auth:
+  type: noauth
+scripts:
+- type: afterResponse
+  code: |-
+    pm.test('Status is one of 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));
+  language: text/javascript
+order: 2000

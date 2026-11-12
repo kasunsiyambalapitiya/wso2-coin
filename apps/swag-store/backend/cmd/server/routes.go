@@ -49,14 +49,17 @@ type routeDef struct {
 // app holds every handler. routeTable only takes method values, so a zero
 // app is enough for the route tests.
 type app struct {
-	health  *handler.HealthHandler
-	users   *handler.UsersHandler
-	wallets *handler.WalletsHandler
-	catalog *handler.CatalogHandler
-	cart    *handler.CartHandler
-	offices *handler.OfficesHandler
-	orders  *handler.OrdersHandler
-	alerts  *handler.AlertsHandler
+	health       *handler.HealthHandler
+	users        *handler.UsersHandler
+	wallets      *handler.WalletsHandler
+	catalog      *handler.CatalogHandler
+	cart         *handler.CartHandler
+	offices      *handler.OfficesHandler
+	orders       *handler.OrdersHandler
+	alerts       *handler.AlertsHandler
+	admin        *handler.AdminHandler
+	adminCatalog *handler.AdminCatalogHandler
+	adminOrders  *handler.AdminOrdersHandler
 }
 
 const (
@@ -96,7 +99,32 @@ func routeTable(a *app) []routeDef {
 		{post, "/stock-alerts", permAuthn, limitAlerts, a.alerts.Create},
 		{del, "/stock-alerts/:id", permAuthn, limitAlerts, a.alerts.Delete},
 
+		// Admin: either role.
+		{get, "/admin/dashboard", permView, nil, a.admin.Dashboard},
+		{get, "/admin/audit-events", permView, nil, a.admin.AuditEvents},
+
+		// Admin: Catalog Manager.
+		{get, "/admin/products", permCatalog, nil, a.adminCatalog.List},
+		{post, "/admin/products", permCatalog, nil, a.adminCatalog.Create},
+		{get, "/admin/products/:id", permCatalog, nil, a.adminCatalog.Get},
+		{patch, "/admin/products/:id", permCatalog, nil, a.adminCatalog.Patch},
+		{del, "/admin/products/:id", permCatalog, nil, a.adminCatalog.Delete},
+		{get, "/admin/products/:id/removal-impact", permCatalog, nil, a.adminCatalog.RemovalImpact},
+		{put, "/admin/products/:id/options", permCatalog, nil, a.adminCatalog.SetOptions},
+		{patch, "/admin/products/:id/variants/:variantId", permCatalog, nil, a.adminCatalog.PatchVariant},
+		{post, "/admin/variants/:id/stock-movements", permCatalog, nil, a.adminCatalog.StockMovement},
+		{get, "/admin/categories", permCatalog, nil, a.adminCatalog.Categories},
+		{post, "/admin/categories", permCatalog, nil, a.adminCatalog.CreateCategory},
+		{get, "/admin/categories/:id", permCatalog, nil, a.adminCatalog.GetCategory},
+		{patch, "/admin/categories/:id", permCatalog, nil, a.adminCatalog.PatchCategory},
+		{del, "/admin/categories/:id", permCatalog, nil, a.adminCatalog.DeleteCategory},
+		{get, "/admin/demand", permCatalog, nil, a.adminCatalog.Demand},
+
 		// Admin: Fulfilment Ops.
+		{post, "/admin/orders/search", permFulfil, nil, a.adminOrders.Search},
+		{get, "/admin/orders/:orderNo", permFulfil, nil, a.adminOrders.Get},
+		{patch, "/admin/orders/:orderNo", permFulfil, nil, a.adminOrders.Patch},
+		{post, "/admin/orders/:orderNo/notes", permFulfil, nil, a.adminOrders.AddNote},
 		{get, "/admin/pickup-offices", permFulfil, nil, a.offices.AdminList},
 		{post, "/admin/pickup-offices", permFulfil, nil, a.offices.Create},
 		{patch, "/admin/pickup-offices/:id", permFulfil, nil, a.offices.Update},

@@ -1,0 +1,3 @@
+$kind: collection
+description: Office, quote, order and payment retry. Needs walletAddress (List wallets) and variantId (Get product).
+order: 7000

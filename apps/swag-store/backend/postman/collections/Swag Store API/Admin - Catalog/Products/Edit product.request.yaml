@@ -1,0 +1,23 @@
+$kind: http-request
+description: 'Field form: send only the fields to change.'
+method: PATCH
+url: '{{baseUrl}}/admin/products/:id'
+headers:
+- key: Content-Type
+  value: application/json
+pathVariables:
+- key: id
+  value: '{{adminProductId}}'
+body:
+  type: json
+  content: |-
+    {
+      "description": "Steel bottle, 750 ml. Keeps drinks cold for 24 hours.",
+      "price": 65
+    }
+scripts:
+- type: afterResponse
+  code: |-
+    pm.test('Status is 2xx', () => pm.expect(pm.response.code).to.be.within(200, 299));
+  language: text/javascript
+order: 4000

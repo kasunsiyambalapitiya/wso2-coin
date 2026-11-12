@@ -1,0 +1,32 @@
+name: Swag Store local
+values:
+- key: baseUrl
+  value: http://localhost:8080
+  enabled: true
+  type: default
+  description: go run ./cmd/server
+- key: jwtAssertion
+  value: ''
+  enabled: true
+  type: secret
+  description: A real x-jwt-assertion. Leave empty locally to use the minted token
+- key: mintLocalToken
+  value: 'true'
+  enabled: true
+  type: default
+  description: true = build an unsigned token (store must run with AUTH_TOKEN_VALIDATOR_ENABLED=false)
+- key: userEmail
+  value: you@wso2.com
+  enabled: true
+  type: default
+  description: With the fakes, any @wso2.com address is an active employee; leaver.* is a marked leaver
+- key: userId
+  value: 00000000-0000-4000-8000-000000000001
+  enabled: true
+  type: default
+  description: userid claim
+- key: userGroups
+  value: swag-catalog-managers,swag-fulfilment-ops
+  enabled: true
+  type: default
+  description: groups claim; must match AUTH_*_GROUPS for admin requests. Empty = shopper only

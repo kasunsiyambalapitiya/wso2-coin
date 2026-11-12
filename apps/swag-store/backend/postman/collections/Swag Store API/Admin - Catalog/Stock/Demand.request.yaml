@@ -1,0 +1,10 @@
+$kind: http-request
+description: Pending Notify me alerts per variant.
+method: GET
+url: '{{baseUrl}}/admin/demand'
+scripts:
+- type: afterResponse
+  code: |-
+    pm.test('Status is 2xx', () => pm.expect(pm.response.code).to.be.within(200, 299));
+  language: text/javascript
+order: 2000
