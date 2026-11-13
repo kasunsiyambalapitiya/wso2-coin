@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -103,6 +104,7 @@ type Client struct {
 	sasDay    time.Time
 	sasQuery  map[string]string // today's SAS per photo path
 	keyErrLog time.Time
+	keyRetry  time.Duration // the wait after the last failed key fetch; 0 after a success
 }
 
 // Disabled is the client used when photo storage isn't configured: uploads
@@ -235,17 +237,27 @@ func (c *Client) Health() string {
 	return HealthKeyMissing
 }
 
-// describe turns an Azure error into one without the request URL, which
-// could carry a query string.
+// queryRe finds a URL query string in an error message.
+var queryRe = regexp.MustCompile(`\?[^\s"']*`)
+
+// describe keeps why an Azure call failed (status and code, the network
+// error, or the Entra error such as AADSTS7000215) but never a query string,
+// which could carry a signature.
 func describe(op string, err error) error {
 	var re *azcore.ResponseError
 	if errors.As(err, &re) {
 		return fmt.Errorf("assets: %s failed: %d %s", op, re.StatusCode, re.ErrorCode)
 	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return fmt.Errorf("assets: %s failed: %w", op, err)
+	for _, ce := range []error{context.DeadlineExceeded, context.Canceled} {
+		if errors.Is(err, ce) {
+			return fmt.Errorf("assets: %s failed: %w", op, ce)
+		}
 	}
-	return fmt.Errorf("assets: %s failed", op)
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return fmt.Errorf("assets: %s failed: %s: %s", op, ue.Op, queryRe.ReplaceAllString(ue.Err.Error(), "?…"))
+	}
+	return fmt.Errorf("assets: %s failed: %s", op, queryRe.ReplaceAllString(err.Error(), "?…"))
 }
 
 func (c *Client) clock() time.Time {

@@ -40,6 +40,8 @@ const (
 	keyRenewBelow = 72 * time.Hour
 	keyCheckEvery = time.Hour
 	keyErrLogGap  = time.Minute
+	// After a failed fetch, try again soon: 1 min, doubling up to the hourly check.
+	keyRetryFirst = time.Minute
 )
 
 // ReadURL is the signed, read-only URL of a photo, or nil when photos are off,
@@ -99,32 +101,34 @@ func (c *Client) Start(ctx context.Context) {
 		return
 	}
 	go func() {
-		c.refreshKey(ctx)
-		t := time.NewTicker(keyCheckEvery)
+		t := time.NewTimer(c.refreshKey(ctx))
 		defer t.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				c.refreshKey(ctx)
+				t.Reset(c.refreshKey(ctx))
 			}
 		}
 	}()
 }
 
 // refreshKey gets a new delegation key when there is none or less than three
-// days are left on it.
-func (c *Client) refreshKey(ctx context.Context) {
+// days are left on it, and says how long to wait before checking again: an
+// hour normally, less after a failure so photos come back soon.
+func (c *Client) refreshKey(ctx context.Context) time.Duration {
 	now := c.clock().UTC()
 	c.mu.Lock()
 	fresh := c.sign != nil && c.signUntil.Sub(now) >= keyRenewBelow
 	c.mu.Unlock()
 	if fresh {
-		return
+		return keyCheckEvery
 	}
 	start, expiry := now.Truncate(day).Add(-keyLead), now.Add(keyLifetime)
-	sign, err := c.fetchKey(ctx, start, expiry)
+	fetchCtx, cancel := context.WithTimeout(ctx, c.fetchTimeout())
+	sign, err := c.fetchKey(fetchCtx, start, expiry)
+	cancel()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err != nil {
@@ -132,13 +136,23 @@ func (c *Client) refreshKey(ctx context.Context) {
 			slog.Error("assets_key_failed", "err", err)
 			c.keyErrLog = now
 		}
-		return
+		c.keyRetry = min(max(2*c.keyRetry, keyRetryFirst), keyCheckEvery)
+		return c.keyRetry
 	}
-	c.sign, c.signUntil = sign, expiry
+	c.sign, c.signUntil, c.keyRetry = sign, expiry, 0
 	c.sasQuery = nil // sign today's URLs again with the new key
+	return keyCheckEvery
 }
 
-// keyUsable: the caller holds c.mu.
+func (c *Client) fetchTimeout() time.Duration {
+	if c.timeout > 0 {
+		return c.timeout
+	}
+	return 25 * time.Second
+}
+
+// keyUsable: today's URLs can be signed (they need the key until 48 h after
+// today's midnight). The caller holds c.mu.
 func (c *Client) keyUsable(now time.Time) bool {
-	return c.sign != nil && (c.signUntil.IsZero() || c.signUntil.After(now))
+	return c.sign != nil && (c.signUntil.IsZero() || !c.signUntil.Before(now.UTC().Truncate(day).Add(sasLifetime)))
 }

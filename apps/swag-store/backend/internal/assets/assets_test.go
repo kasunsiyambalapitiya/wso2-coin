@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -119,4 +120,22 @@ func TestEnsureContainer(t *testing.T) {
 	r := reqs()[0]
 	assertEq(t, r.method, http.MethodPut)
 	assertEq(t, r.path, "/devstoreaccount1/swag-store-assets")
+}
+
+func TestDescribeKeepsReasonsNotQueries(t *testing.T) {
+	ue := &url.Error{Op: "Put", URL: "https://acc.blob.core.windows.net/c/p.jpg?sv=1&sig=SECRET",
+		Err: errors.New("dial tcp: lookup acc.blob.core.windows.net: no such host")}
+	got := describe("upload", ue).Error()
+	if !strings.Contains(got, "no such host") || strings.Contains(got, "SECRET") || strings.Contains(got, "sig=") {
+		t.Fatalf("url error = %q", got)
+	}
+	auth := errors.New("ClientSecretCredential authentication failed\nPOST https://login.microsoftonline.com/t/oauth2/v2.0/token?a=b\nAADSTS7000215: Invalid client secret provided.")
+	got = describe("delegation key", auth).Error()
+	if !strings.Contains(got, "AADSTS7000215") || strings.Contains(got, "?a=b") {
+		t.Fatalf("auth error = %q", got)
+	}
+	timeout := describe("upload", &url.Error{Op: "Put", URL: "https://x/y?sig=SECRET", Err: context.DeadlineExceeded})
+	if !errors.Is(timeout, context.DeadlineExceeded) || strings.Contains(timeout.Error(), "SECRET") {
+		t.Fatalf("timeout = %v", timeout)
+	}
 }

@@ -51,6 +51,7 @@ func testRouter(user *reqctx.User, method, path string, h gin.HandlerFunc) *gin.
 // fakePhotos signs every photo with a fixed query, or nothing when off.
 type fakePhotos struct {
 	off     bool
+	health  string // what Health reports; "" means ok
 	puts    []string
 	putErrs []error // returned in order by Put; nil once used up
 }
@@ -61,6 +62,16 @@ func (f *fakePhotos) ReadURL(path string) *string {
 	}
 	u := "https://acc.blob.core.windows.net/c/" + path + "?sig=x"
 	return &u
+}
+
+func (f *fakePhotos) Health() string {
+	switch {
+	case f.health != "":
+		return f.health
+	case f.off:
+		return "not_configured"
+	}
+	return "ok"
 }
 
 func (f *fakePhotos) Put(_ context.Context, path string, _ []byte, _ string) error {

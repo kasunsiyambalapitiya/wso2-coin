@@ -39,10 +39,12 @@ type PhotoURLs interface {
 	ReadURL(path string) *string
 }
 
-// PhotoStore also stores new photos. Put never overwrites a blob.
+// PhotoStore also stores new photos. Put never overwrites a blob. Health is
+// "ok", "not_configured", or "key_unavailable" when photos can't be signed.
 type PhotoStore interface {
 	PhotoURLs
 	Put(ctx context.Context, path string, body []byte, contentType string) error
+	Health() string
 }
 
 type imageJSON struct {
@@ -86,6 +88,12 @@ func (h *AdminCatalogHandler) UploadImage(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// The form is read before any refusal: a reply sent while the browser is
+	// still uploading can reach it as a reset connection, not the message.
+	view, body, ok := h.readPhotoForm(c)
+	if !ok {
+		return
+	}
 	ctx := c.Request.Context()
 	d, err := h.store.ProductByID(ctx, id)
 	if err != nil {
@@ -100,8 +108,14 @@ func (h *AdminCatalogHandler) UploadImage(c *gin.Context) {
 		writeErrorCode(c, http.StatusConflict, "This product was removed. Restore it to change its photos.", CodeStateConflict)
 		return
 	}
-	view, body, ok := h.readPhotoForm(c)
-	if !ok {
+	// A photo that can't be shown isn't stored: the admin would see a blank slot.
+	switch h.photos.Health() {
+	case assets.HealthNotConfigured:
+		writeErrorCode(c, http.StatusServiceUnavailable, "Photos aren't set up in this environment.", CodeAssetsNotConfigured)
+		return
+	case assets.HealthKeyMissing:
+		slog.ErrorContext(ctx, "admin photos: no signing key; upload refused")
+		writeErrorCode(c, http.StatusServiceUnavailable, "Photo storage can't be reached right now. Try again in a minute.", CodeAssetsUnavailable)
 		return
 	}
 	// The bytes decide the type; the part's Content-Type and file name are not trusted.
@@ -193,6 +207,8 @@ func (h *AdminCatalogHandler) readPhotoForm(c *gin.Context) (view string, body [
 		}
 		_ = p.Close()
 	}
+	// Read to the end (still capped by MaxBytesReader) so the reply never races the upload.
+	_, _ = io.Copy(io.Discard, c.Request.Body)
 	switch {
 	case views != 1 || files != 1:
 		writeError(c, http.StatusBadRequest, oneOfEach)

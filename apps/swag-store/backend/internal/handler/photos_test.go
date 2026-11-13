@@ -19,6 +19,7 @@ package handler
 import (
 	"bytes"
 	"errors"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -208,5 +209,50 @@ func TestPhotoUploadSniffsType(t *testing.T) {
 			!strings.Contains(rec.Body.String(), "Photos must be JPEG, PNG or WebP.") {
 			t.Errorf("%s = %d %s", name, rec.Code, rec.Body)
 		}
+	}
+}
+
+func TestPhotoUploadRefusedWithoutSigningKey(t *testing.T) {
+	photos := &fakePhotos{health: "key_unavailable"}
+	h := NewAdminCatalogHandler(&fakeAdminCatalog{detail: activeDetail()}, NewListCache(), photos, 5<<20)
+	body, ct := formBody(t, view("front"), file(pngBytes))
+	rec := upload(uploadRouter(h, nil), body, ct)
+	if rec.Code != 503 || decode[errorBody](t, rec).ErrorCode != CodeAssetsUnavailable || len(photos.puts) != 0 {
+		t.Fatalf("no signing key = %d %s, puts %v", rec.Code, rec.Body, photos.puts)
+	}
+	off := NewAdminCatalogHandler(&fakeAdminCatalog{detail: activeDetail()}, NewListCache(), &fakePhotos{off: true}, 5<<20)
+	if rec := upload(uploadRouter(off, nil), body, ct); rec.Code != 503 || decode[errorBody](t, rec).ErrorCode != CodeAssetsNotConfigured {
+		t.Fatalf("photos off = %d %s", rec.Code, rec.Body)
+	}
+}
+
+// eofReader reports whether the handler read the whole upload.
+type eofReader struct {
+	r    io.Reader
+	done bool
+}
+
+func (e *eofReader) Read(p []byte) (int, error) {
+	n, err := e.r.Read(p)
+	if err == io.EOF {
+		e.done = true
+	}
+	return n, err
+}
+
+// A refusal sent before the upload is read can reach the browser as a reset
+// connection instead of the message, so the form is read first.
+func TestPhotoUploadReadsBodyBeforeRefusing(t *testing.T) {
+	d := activeDetail()
+	d.Product.Status = "REMOVED"
+	h := NewAdminCatalogHandler(&fakeAdminCatalog{detail: d}, NewListCache(), &fakePhotos{}, 5<<20)
+	body, ct := formBody(t, view("front"), file(append(pngBytes, bytes.Repeat([]byte{9}, 2<<20)...)))
+	src := &eofReader{r: strings.NewReader(body)}
+	req := httptest.NewRequest(http.MethodPost, "/admin/products/"+pid+"/images", src)
+	req.Header.Set("Content-Type", ct)
+	rec := httptest.NewRecorder()
+	uploadRouter(h, nil).ServeHTTP(rec, req)
+	if rec.Code != 409 || !src.done {
+		t.Fatalf("removed product = %d, upload read to the end: %v", rec.Code, src.done)
 	}
 }

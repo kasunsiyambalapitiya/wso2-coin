@@ -165,3 +165,56 @@ func TestDelegationKeyRenewal(t *testing.T) {
 		t.Fatal("signed with an expired key")
 	}
 }
+
+func TestKeyRetryBackoff(t *testing.T) {
+	signer := newSharedKeyClient(t, "https://acc.blob.core.windows.net", "photos").sign
+	fails := 0
+	deadlines := 0
+	c := &Client{accountURL: "https://acc.blob.core.windows.net", container: "photos", protocol: sas.ProtocolHTTPS, timeout: time.Second,
+		fetchKey: func(ctx context.Context, _, _ time.Time) (signFunc, error) {
+			if _, ok := ctx.Deadline(); ok {
+				deadlines++
+			}
+			if fails > 0 {
+				fails--
+				return nil, errors.New("no network")
+			}
+			return signer, nil
+		}}
+	c.now = at("2026-11-13T10:00:00Z")
+	fails = 9
+	var waits []time.Duration
+	for range 9 {
+		waits = append(waits, c.refreshKey(context.Background()))
+	}
+	want := []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 16 * time.Minute, 32 * time.Minute, time.Hour, time.Hour, time.Hour}
+	for i := range want {
+		if waits[i] != want[i] {
+			t.Fatalf("failure %d waits %v, want %v (all %v)", i+1, waits[i], want[i], waits)
+		}
+	}
+	if next := c.refreshKey(context.Background()); next != time.Hour || c.Health() != HealthOK {
+		t.Fatalf("after success: wait %v, health %s", next, c.Health())
+	}
+	if deadlines != 10 {
+		t.Fatalf("fetches with a deadline = %d of 10", deadlines)
+	}
+	fails = 1
+	c.now = at("2026-11-18T11:00:00Z") // renewal due; it fails, and the backoff starts over
+	if next := c.refreshKey(context.Background()); next != time.Minute {
+		t.Fatalf("first failure after a success waits %v", next)
+	}
+}
+
+func TestHealthMatchesSigning(t *testing.T) {
+	signer := newSharedKeyClient(t, "https://acc.blob.core.windows.net", "photos").sign
+	c := &Client{accountURL: "https://acc.blob.core.windows.net", container: "photos", protocol: sas.ProtocolHTTPS,
+		fetchKey: func(context.Context, time.Time, time.Time) (signFunc, error) { return signer, nil }}
+	c.now = at("2026-11-13T10:00:00Z")
+	c.refreshKey(context.Background()) // key until 2026-11-20T09:55
+	c.now = at("2026-11-19T12:00:00Z") // still valid, but today's URLs would need it until 2026-11-21
+	if c.ReadURL(testPhoto) != nil {
+		t.Fatal("signed past the key's end")
+	}
+	assertEq(t, c.Health(), HealthKeyMissing)
+}
