@@ -66,6 +66,24 @@ The token needs `email`, `userid` and (for admin) `groups` claims. With
 `AUTH_TOKEN_VALIDATOR_ENABLED=false` any JWT shape is decoded without a signature check; startup refuses
 that unless every upstream is loopback.
 
+### Product photos
+
+Photos go to a private Blob container; the API returns each one with a signed, read-only URL for that blob
+that lasts at least 24 hours. To try uploads locally, run Azurite, Microsoft's Blob emulator, and point the
+store at it with its published development key (the commented block in `.env.example`):
+
+```bash
+docker run -d --name swag-azurite -p 127.0.0.1:10000:10000 \
+  mcr.microsoft.com/azure-storage/azurite azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
+export ASSETS_ACCOUNT_URL=http://127.0.0.1:10000/devstoreaccount1 ASSETS_ACCOUNT_KEY=<Azurite's key>
+make seed             # also creates the photo container
+curl -H "x-jwt-assertion: $JWT" -F view=front -F file=@photo.jpg \
+  http://localhost:8080/admin/products/$PRODUCT_ID/images
+```
+
+In Azure, ops create the container and give the backend identity **Storage Blob Data Contributor** on the
+container and **Storage Blob Delegator** on the account; no key or SAS is configured.
+
 ### Postman
 
 `postman/collections/Swag Store API` is a Postman v3 collection that covers every route (51 requests).
@@ -115,10 +133,14 @@ When a route changes, update `openapi.yaml` and the matching request file.
 | `EMAIL_DEBUG_RECIPIENTS` | No | none | Every email goes only here as "[Test copy]". Set in every non-production environment |
 | `STORE_TREASURY_WALLET_ADDRESS` | Yes | — | The only payee a payment can name |
 | `STORE_CONTACT_EMAIL` · `STORE_WEB_URL` | Yes | — | Reply-To and "Something wrong?" · base URL for email links |
-| `IMAGE_URL_HOSTS` | No | `*.wso2.com,wso2.cachefly.net,*.blob.core.windows.net` | Allowed product image hosts (https) |
 | `HR_CACHE_TTL` | No | `1h` | HR answer cache |
 | `LOW_STOCK_THRESHOLD` · `PICKUP_REMINDER_DAYS` · `UNCOLLECTED_FLAG_DAYS` | No | `5` · `7` · `30` | Store rules |
 | `STORE_TIMEZONE` | No | `Asia/Colombo` | Digest schedule and dates in emails |
+| `ASSETS_ACCOUNT_URL` | No | none | `https://<account>.blob.core.windows.net`. Unset = photos off: uploads 503, photo URLs null. No path or query (a path only for the loopback emulator) |
+| `ASSETS_CONTAINER` | No | `swag-store-assets` | The private photo container. The backend identity's role is scoped to it |
+| `ASSETS_MAX_UPLOAD_BYTES` | No | `5242880` | The largest photo accepted |
+| `AZURE_TENANT_ID` · `AZURE_CLIENT_ID` · `AZURE_CLIENT_SECRET` | No | managed identity | An app registration (secret in a Choreo secret). Without a secret the managed identity is used; `AZURE_CLIENT_ID` alone picks a user-assigned one |
+| `ASSETS_ACCOUNT_KEY` | No | none | Local emulator only; refused with any non-loopback account URL |
 
 Every base URL must be `https` (loopback `http` is allowed). Malformed values stop startup and are named.
 
@@ -145,3 +167,5 @@ Every base URL must be `https` (loopback `http` is allowed). Malformed values st
 - The Choreo Go buildpack offers Go 1.27 and builds `./cmd/server`.
 - email-service answers `GET /health` (used by `/health/dependencies`).
 - Launch catalog sizes, restock policies and the office list in `cmd/seed` (design Q11).
+- Choreo components can use a managed identity for Blob (else an app registration), and can reach
+  `login.microsoftonline.com` and `*.blob.core.windows.net`.

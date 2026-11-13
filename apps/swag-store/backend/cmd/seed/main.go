@@ -33,6 +33,8 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 
+	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/assets"
+	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/httpsec"
 	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/repository"
 )
 
@@ -181,5 +183,31 @@ func run() error {
 		}
 		fmt.Println("office", o.Name)
 	}
+	return photoContainer(ctx)
+}
+
+// photoContainer creates the photo container in the local emulator. It runs
+// only with ASSETS_ACCOUNT_KEY, which the server accepts only on loopback; in
+// Azure, ops create the container.
+func photoContainer(ctx context.Context) error {
+	accountURL, key := os.Getenv("ASSETS_ACCOUNT_URL"), os.Getenv("ASSETS_ACCOUNT_KEY")
+	if accountURL == "" || key == "" {
+		return nil
+	}
+	if !httpsec.IsLoopbackURL(accountURL) {
+		return errors.New("ASSETS_ACCOUNT_KEY is only for the local emulator on a loopback ASSETS_ACCOUNT_URL")
+	}
+	name := os.Getenv("ASSETS_CONTAINER")
+	if name == "" {
+		name = "swag-store-assets"
+	}
+	c, err := assets.New(assets.Config{AccountURL: accountURL, Container: name, AccountKey: key})
+	if err != nil {
+		return err
+	}
+	if err := c.EnsureContainer(ctx); err != nil {
+		return err
+	}
+	fmt.Println("photo container", name)
 	return nil
 }
