@@ -189,3 +189,57 @@ func TestLoadDotEnvNeverOverrides(t *testing.T) {
 		t.Fatalf("missing file must be fine: %v", err)
 	}
 }
+
+func TestAssetsConfigChecks(t *testing.T) {
+	const azure = "https://acc.blob.core.windows.net"
+	bad := map[string]map[string]string{
+		"ASSETS_ACCOUNT_URL query":       {"ASSETS_ACCOUNT_URL": azure + "?x=1"},
+		"ASSETS_ACCOUNT_URL path":        {"ASSETS_ACCOUNT_URL": azure + "/acc"},
+		"ASSETS_ACCOUNT_URL http":        {"ASSETS_ACCOUNT_URL": "http://acc.blob.core.windows.net"},
+		"ASSETS_CONTAINER":               {"ASSETS_ACCOUNT_URL": azure, "ASSETS_CONTAINER": "Swag--Assets"},
+		"ASSETS_CONTAINER short":         {"ASSETS_ACCOUNT_URL": azure, "ASSETS_CONTAINER": "ab"},
+		"ASSETS_ACCOUNT_KEY":             {"ASSETS_ACCOUNT_URL": azure, "ASSETS_ACCOUNT_KEY": "a2V5"},
+		"ASSETS_ACCOUNT_KEY loopback":    {"ASSETS_ACCOUNT_URL": "http://127.0.0.1:10000/devstoreaccount1"},
+		"AZURE_CLIENT_SECRET":            {"ASSETS_ACCOUNT_URL": azure, "AZURE_CLIENT_SECRET": "s"},
+		"ASSETS_MAX_UPLOAD_BYTES":        {"ASSETS_MAX_UPLOAD_BYTES": "0"},
+		"ASSETS_CONTAINER trailing dash": {"ASSETS_ACCOUNT_URL": azure, "ASSETS_CONTAINER": "photos-"},
+	}
+	for name, extra := range bad {
+		env := baseEnv()
+		for k, v := range extra {
+			env[k] = v
+		}
+		_, err := loadConfig(envFunc(env))
+		if err == nil || !strings.Contains(err.Error(), strings.Fields(name)[0]) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+
+	cfg, err := loadConfig(envFunc(baseEnv()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Assets.AccountURL != "" || cfg.Assets.Container != "swag-store-assets" || cfg.MaxUploadBytes != 5242880 {
+		t.Fatalf("defaults = %+v, %d", cfg.Assets, cfg.MaxUploadBytes)
+	}
+
+	for name, extra := range map[string]map[string]string{
+		"emulator":         {"ASSETS_ACCOUNT_URL": "http://127.0.0.1:10000/devstoreaccount1", "ASSETS_ACCOUNT_KEY": "a2V5"},
+		"app registration": {"ASSETS_ACCOUNT_URL": azure, "AZURE_TENANT_ID": "t", "AZURE_CLIENT_ID": "c", "AZURE_CLIENT_SECRET": "s"},
+		"managed identity": {"ASSETS_ACCOUNT_URL": azure + "/"},
+		"user-assigned":    {"ASSETS_ACCOUNT_URL": azure, "AZURE_CLIENT_ID": "c", "ASSETS_CONTAINER": "photos-2"},
+	} {
+		env := baseEnv()
+		for k, v := range extra {
+			env[k] = v
+		}
+		cfg, err := loadConfig(envFunc(env))
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if cfg.Assets.AccountURL == "" || cfg.Assets.Timeout != cfg.UpstreamTimeout {
+			t.Errorf("%s: assets = %+v", name, cfg.Assets)
+		}
+	}
+}

@@ -121,7 +121,14 @@ func run() error {
 		emailProbe = handler.ErrProbe("email", emailClient.Health)
 	}
 
+	// Photos are optional: without ASSETS_ACCOUNT_URL, uploads answer 503 and
+	// every photo URL is null.
 	photos := assets.Disabled()
+	if cfg.Assets.AccountURL != "" {
+		if photos, err = assets.New(cfg.Assets); err != nil {
+			return err
+		}
+	}
 	guard := handler.NewAccessGuard(cfg.Access)
 	listCache := handler.NewListCache()
 	a := &app{
@@ -134,6 +141,7 @@ func run() error {
 			}},
 			handler.ErrProbe("hrEntity", hrClient.Health),
 			emailProbe,
+			{Name: "assets", Check: func(context.Context) string { return photos.Health() }},
 		}),
 		users:        handler.NewUsersHandler(guard, employees),
 		wallets:      handler.NewWalletsHandler(coinsClient),
@@ -143,12 +151,13 @@ func run() error {
 		orders:       handler.NewOrdersHandler(svc, repo),
 		alerts:       handler.NewAlertsHandler(repo),
 		admin:        handler.NewAdminHandler(guard, repo, cfg.LowStockThreshold, cfg.Timezone),
-		adminCatalog: handler.NewAdminCatalogHandler(repo, listCache, photos, 5<<20),
+		adminCatalog: handler.NewAdminCatalogHandler(repo, listCache, photos, cfg.MaxUploadBytes),
 		adminOrders:  handler.NewAdminOrdersHandler(repo),
 	}
 
 	jobsCtx, stopJobs := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopJobs()
+	photos.Start(jobsCtx) // fetches and renews the photo-signing key in the background
 	var runner *jobs.Runner
 	if cfg.JobsEnabled {
 		common := notifications.Common{StoreURL: cfg.WebURL, ContactEmail: cfg.ContactEmail, Timezone: cfg.Timezone}

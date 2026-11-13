@@ -22,13 +22,16 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
 
+	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/assets"
 	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/handler"
 	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/httpsec"
 	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/middleware"
@@ -75,6 +78,46 @@ type Config struct {
 	PickupReminderDays  int
 	UncollectedFlagDays int
 	Timezone            *time.Location
+
+	// Product photos. Assets.AccountURL empty means photos are off.
+	Assets         assets.Config
+	MaxUploadBytes int64
+}
+
+// containerNameRe is Azure's container naming rule, without the length.
+var containerNameRe = regexp.MustCompile(`^[a-z0-9](?:-?[a-z0-9])*$`)
+
+// photoStorage checks the photo settings. Nothing here calls Azure: a Blob
+// outage or a missing role must never stop the store from starting.
+func (e *envReader) photoStorage(a *assets.Config) {
+	if n := len(a.Container); n < 3 || n > 63 || !containerNameRe.MatchString(a.Container) {
+		e.errs = append(e.errs, fmt.Errorf("ASSETS_CONTAINER must be 3 to 63 lower-case letters, digits and single hyphens, got %q", a.Container))
+	}
+	if a.AccountURL == "" {
+		return
+	}
+	a.AccountURL = strings.TrimRight(a.AccountURL, "/")
+	e.secureURL("ASSETS_ACCOUNT_URL", a.AccountURL)
+	u, err := url.Parse(a.AccountURL)
+	if err != nil {
+		return // secureURL has reported it
+	}
+	loopback := httpsec.IsLoopbackURL(a.AccountURL)
+	switch {
+	case u.RawQuery != "" || u.Fragment != "":
+		e.errs = append(e.errs, errors.New("ASSETS_ACCOUNT_URL must not carry a query"))
+	case u.Path != "" && !loopback:
+		e.errs = append(e.errs, errors.New("ASSETS_ACCOUNT_URL takes no path; a path is only for the local emulator"))
+	}
+	if a.AccountKey != "" && !loopback {
+		e.errs = append(e.errs, errors.New("ASSETS_ACCOUNT_KEY is only for the local emulator on a loopback ASSETS_ACCOUNT_URL"))
+	}
+	if u.Scheme == "http" && a.AccountKey == "" {
+		e.errs = append(e.errs, errors.New("ASSETS_ACCOUNT_KEY is required with an http ASSETS_ACCOUNT_URL: Entra sign-in needs https"))
+	}
+	if a.ClientSecret != "" && (a.TenantID == "" || a.ClientID == "") {
+		e.errs = append(e.errs, errors.New("AZURE_CLIENT_SECRET needs AZURE_TENANT_ID and AZURE_CLIENT_ID"))
+	}
 }
 
 // sqlMode is the strict mode every connection runs with.
@@ -238,6 +281,18 @@ func loadConfig(get func(string) string) (*Config, error) {
 		tz = time.UTC
 	}
 	c.Timezone = tz
+
+	c.MaxUploadBytes = int64(e.count("ASSETS_MAX_UPLOAD_BYTES", 5<<20, 1))
+	c.Assets = assets.Config{
+		AccountURL:   e.str("ASSETS_ACCOUNT_URL"),
+		Container:    e.or("ASSETS_CONTAINER", "swag-store-assets"),
+		AccountKey:   e.str("ASSETS_ACCOUNT_KEY"),
+		TenantID:     e.str("AZURE_TENANT_ID"),
+		ClientID:     e.str("AZURE_CLIENT_ID"),
+		ClientSecret: e.str("AZURE_CLIENT_SECRET"),
+		Timeout:      c.UpstreamTimeout,
+	}
+	e.photoStorage(&c.Assets)
 
 	// Decode-only tokens are for local runs: every upstream must be loopback.
 	if !c.Auth.ValidatorEnabled {
