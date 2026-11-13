@@ -36,6 +36,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/golang-jwt/jwt/v5"
 
+	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/assets"
 	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/checkout"
 	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/coins"
 	"github.com/wso2/wso2-coin/apps/swag-store/backend/internal/handler"
@@ -120,6 +121,7 @@ func run() error {
 		emailProbe = handler.ErrProbe("email", emailClient.Health)
 	}
 
+	photos := assets.Disabled()
 	guard := handler.NewAccessGuard(cfg.Access)
 	listCache := handler.NewListCache()
 	a := &app{
@@ -135,13 +137,13 @@ func run() error {
 		}),
 		users:        handler.NewUsersHandler(guard, employees),
 		wallets:      handler.NewWalletsHandler(coinsClient),
-		catalog:      handler.NewCatalogHandler(repo, listCache, cfg.LowStockThreshold),
-		cart:         handler.NewCartHandler(repo, cfg.LowStockThreshold),
+		catalog:      handler.NewCatalogHandler(repo, listCache, cfg.LowStockThreshold, photos),
+		cart:         handler.NewCartHandler(repo, cfg.LowStockThreshold, photos),
 		offices:      handler.NewOfficesHandler(repo, employees),
 		orders:       handler.NewOrdersHandler(svc, repo),
 		alerts:       handler.NewAlertsHandler(repo),
 		admin:        handler.NewAdminHandler(guard, repo, cfg.LowStockThreshold, cfg.Timezone),
-		adminCatalog: handler.NewAdminCatalogHandler(repo, listCache, cfg.ImageHosts),
+		adminCatalog: handler.NewAdminCatalogHandler(repo, listCache, photos, 5<<20),
 		adminOrders:  handler.NewAdminOrdersHandler(repo),
 	}
 

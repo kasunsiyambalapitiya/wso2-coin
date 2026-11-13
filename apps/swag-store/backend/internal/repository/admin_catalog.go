@@ -44,18 +44,21 @@ type ProductInput struct {
 	Alternatives    []string
 }
 
-// ImageInput is one gallery image.
+// ImageInput is one product photo: its view and blob path.
 type ImageInput struct {
-	URL string
-	Alt string
+	View string
+	Path string
+	Alt  string
 }
 
 func (s *Store) writeImagesAndAlternatives(ctx context.Context, q *store.Queries, productID string, in ProductInput) error {
 	if err := q.DeleteProductImages(ctx, productID); err != nil {
 		return err
 	}
-	for i, im := range in.Images {
-		if err := q.InsertImage(ctx, store.InsertImageParams{ID: newID(), ProductID: productID, Url: im.URL, Alt: im.Alt, Sort: int32(i)}); err != nil { // #nosec G115
+	for _, im := range in.Images {
+		rank, _ := catalog.PhotoRank(im.View) // the handler has checked the view
+		if err := q.InsertImage(ctx, store.InsertImageParams{ID: newID(), ProductID: productID, PhotoView: im.View, Path: im.Path,
+			Alt: im.Alt, Sort: int32(rank)}); err != nil { // #nosec G115
 			return err
 		}
 	}
@@ -164,7 +167,7 @@ func inputOf(ctx context.Context, q *store.Queries, row store.Product) (ProductI
 		return in, err
 	}
 	for _, im := range images {
-		in.Images = append(in.Images, ImageInput{URL: im.Url, Alt: im.Alt})
+		in.Images = append(in.Images, ImageInput{View: im.PhotoView, Path: im.Path, Alt: im.Alt})
 	}
 	in.Alternatives, err = q.ListAlternativeIDs(ctx, p.ID)
 	return in, err
@@ -747,4 +750,20 @@ FROM swag_variants WHERE product_id = ?`, productID).Scan(&imp.FreeStock)
 		return nil, err
 	}
 	return imp, nil
+}
+
+// PhotoUploadDetail is the audit detail of one photo upload.
+type PhotoUploadDetail struct {
+	View        string `json:"view"`
+	Path        string `json:"path"`
+	Bytes       int    `json:"bytes"`
+	ContentType string `json:"contentType"`
+}
+
+// RecordPhotoUpload audits a photo stored in Blob. The product itself changes
+// only when a later edit saves the photo list.
+func (s *Store) RecordPhotoUpload(ctx context.Context, a Actor, productID string, d PhotoUploadDetail) error {
+	return s.inTx(ctx, func(q *store.Queries) error {
+		return audit(ctx, q, a, "product_image_uploaded", "product", productID, d)
+	})
 }

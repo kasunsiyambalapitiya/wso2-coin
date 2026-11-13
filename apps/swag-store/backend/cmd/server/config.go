@@ -70,15 +70,12 @@ type Config struct {
 	TreasuryWallet      string
 	ContactEmail        string
 	WebURL              string
-	ImageHosts          []string
 	HRCacheTTL          time.Duration
 	LowStockThreshold   int
 	PickupReminderDays  int
 	UncollectedFlagDays int
 	Timezone            *time.Location
 }
-
-const defaultImageHosts = "*.wso2.com,wso2.cachefly.net,*.blob.core.windows.net"
 
 // sqlMode is the strict mode every connection runs with.
 const sqlMode = "'STRICT_ALL_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION,ONLY_FULL_GROUP_BY'"
@@ -231,7 +228,6 @@ func loadConfig(get func(string) string) (*Config, error) {
 	c.ContactEmail = e.must("STORE_CONTACT_EMAIL")
 	c.WebURL = e.must("STORE_WEB_URL")
 	e.secureURL("STORE_WEB_URL", c.WebURL)
-	c.ImageHosts = splitComma(e.or("IMAGE_URL_HOSTS", defaultImageHosts))
 	c.HRCacheTTL = e.duration("HR_CACHE_TTL", time.Hour)
 	c.LowStockThreshold = e.count("LOW_STOCK_THRESHOLD", 5, 0)
 	c.PickupReminderDays = e.count("PICKUP_REMINDER_DAYS", 7, 1)

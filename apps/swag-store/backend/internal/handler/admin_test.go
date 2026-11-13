@@ -152,7 +152,7 @@ func (f *fakeAdminCatalog) UpdateProduct(_ context.Context, _ repository.Actor, 
 		Price: p.Price, RestockPolicy: p.RestockPolicy, MaxPerUser: p.MaxPerUser, LimitWindowDays: p.LimitWindowDays,
 		Alternatives: append([]string(nil), f.detail.CuratedAlternativeIDs...)}
 	for _, im := range f.detail.Images {
-		in.Images = append(in.Images, repository.ImageInput{URL: im.URL, Alt: im.Alt})
+		in.Images = append(in.Images, repository.ImageInput{View: im.View, Path: im.Path, Alt: im.Alt})
 	}
 	if err := patch(&in); err != nil {
 		return nil, err
@@ -195,12 +195,12 @@ func (f *fakeAdminCatalog) DeleteCategory(context.Context, repository.Actor, str
 func (f *fakeAdminCatalog) Demand(context.Context) ([]repository.DemandRow, error) { return nil, nil }
 
 func adminCatalog(f *fakeAdminCatalog, cache *ListCache) *AdminCatalogHandler {
-	return NewAdminCatalogHandler(f, cache, []string{"*.wso2.com", "wso2.cachefly.net"})
+	return NewAdminCatalogHandler(f, cache, &fakePhotos{}, 5<<20)
 }
 
 func activeDetail() *repository.ProductDetail {
 	return &repository.ProductDetail{Product: repository.Product{ID: pid, Slug: "hoodie", Name: "WSO2 Hoodie", Price: 90,
-		Status: "ACTIVE", RestockPolicy: "RESTOCKABLE"}, Images: []repository.Image{{URL: "https://cdn.wso2.com/h.png", Alt: "Hoodie"}}}
+		Status: "ACTIVE", RestockPolicy: "RESTOCKABLE"}, Images: []repository.Image{{View: "front", Path: "products/" + pid + "/front-3f9a2c1d.jpg", Alt: "Hoodie"}}}
 }
 
 func TestAdminProductStatusPatch(t *testing.T) {
@@ -246,8 +246,7 @@ func TestAdminProductValidation(t *testing.T) {
 	bad := []string{
 		`{"name":"","price":90}`,
 		`{"name":"Hoodie","price":0}`,
-		`{"name":"Hoodie","price":90,"images":[{"url":"https://evil.example/x.png"}]}`,
-		`{"name":"Hoodie","price":90,"images":[{"url":"http://cdn.wso2.com/x.png"}]}`,
+		`{"name":"Hoodie","price":90,"images":[{"view":"front","path":"products/` + pid + `/front-3f9a2c1d.jpg","alt":""}]}`,
 		`{"name":"Hoodie","price":90,"description":"` + strings.Repeat("x", 2001) + `"}`,
 		`{"name":"Hoodie","price":90,"restockPolicy":"SOMETIMES"}`,
 		`{"name":"Hoodie","price":90,"slug":"Bad Slug"}`,
@@ -258,9 +257,80 @@ func TestAdminProductValidation(t *testing.T) {
 			t.Errorf("%.60s accepted: %d", b, rec.Code)
 		}
 	}
-	rec := do(r, http.MethodPost, "/admin/products", `{"name":"WSO2 Hoodie","price":90,"images":[{"url":"https://wso2.cachefly.net/h.png","alt":"x"}]}`)
+	rec := do(r, http.MethodPost, "/admin/products", `{"name":"WSO2 Hoodie","price":90,"images":[]}`)
 	if rec.Code != 201 || f.created.Slug != "wso2-hoodie" || f.created.RestockPolicy != "RESTOCKABLE" {
 		t.Fatalf("create = %d %+v", rec.Code, f.created)
+	}
+}
+
+func TestProductImagesValidation(t *testing.T) {
+	photo := func(view, path, alt string) string {
+		return `{"view":"` + view + `","path":"` + path + `","alt":"` + alt + `"}`
+	}
+	own := func(view string) string { return "products/" + pid + "/" + view + "-3f9a2c1d.jpg" }
+	front := photo("front", own("front"), "")
+	eleven := make([]string, 0, 11)
+	for range 11 {
+		eleven = append(eleven, front)
+	}
+	cases := map[string]struct {
+		body string
+		want int
+	}{
+		"ok, url ignored": {`{"images":[{"view":"front","path":"` + own("front") + `","url":"https://x","alt":""}]}`, 200},
+		"another product": {`{"images":[` + photo("front", "products/0192f3c4-7d1e-7a40-9b2c-000000000000/front-3f9a2c1d.jpg", "") + `]}`, 400},
+		"view mismatch":   {`{"images":[` + photo("back", own("front"), "") + `]}`, 400},
+		"repeated view":   {`{"images":[` + front + `,` + front + `]}`, 400},
+		"unknown view":    {`{"images":[` + photo("side", own("side"), "") + `]}`, 400},
+		"alt over 300":    {`{"images":[` + photo("front", own("front"), strings.Repeat("a", 301)) + `]}`, 400},
+		"eleven photos":   {`{"images":[` + strings.Join(eleven, ",") + `]}`, 400},
+	}
+	for name, tc := range cases {
+		f := &fakeAdminCatalog{detail: activeDetail()}
+		r := testRouter(catalogAdmin, http.MethodPatch, "/admin/products/:id", adminCatalog(f, NewListCache()).Patch)
+		if rec := do(r, http.MethodPatch, "/admin/products/"+pid, tc.body); rec.Code != tc.want {
+			t.Errorf("%s = %d %s", name, rec.Code, rec.Body)
+		}
+	}
+
+	// Saved photos come back in view order whatever order they were sent in.
+	f := &fakeAdminCatalog{detail: activeDetail()}
+	r := testRouter(catalogAdmin, http.MethodPatch, "/admin/products/:id", adminCatalog(f, NewListCache()).Patch)
+	rec := do(r, http.MethodPatch, "/admin/products/"+pid, `{"images":[`+photo("back", own("back"), " Logo ")+`,`+front+`]}`)
+	if rec.Code != 200 || len(f.updated.Images) != 2 || f.updated.Images[0].View != "front" || f.updated.Images[1].Alt != "Logo" {
+		t.Fatalf("ordered = %d %+v", rec.Code, f.updated)
+	}
+
+	c := testRouter(catalogAdmin, http.MethodPost, "/admin/products", adminCatalog(&fakeAdminCatalog{}, NewListCache()).Create)
+	rec = do(c, http.MethodPost, "/admin/products", `{"name":"Hoodie","price":90,"images":[`+front+`]}`)
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "Save the product before adding photos.") {
+		t.Fatalf("create with photos = %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestAdminProductPhotoURLs(t *testing.T) {
+	d := activeDetail()
+	d.Images = []repository.Image{
+		{View: "back", Path: "products/" + pid + "/back-0a1b2c3d.png"},
+		{View: "front", Path: "products/" + pid + "/front-3f9a2c1d.jpg", Alt: "Hoodie"},
+	}
+	h := NewAdminCatalogHandler(&fakeAdminCatalog{detail: d}, NewListCache(), &fakePhotos{}, 5<<20)
+	rec := do(testRouter(catalogAdmin, http.MethodGet, "/admin/products/:id", h.Get), http.MethodGet, "/admin/products/"+pid, "")
+	body := decode[struct {
+		Images []struct {
+			View, Path, Alt string
+			URL             *string
+		} `json:"images"`
+	}](t, rec)
+	if rec.Code != 200 || len(body.Images) != 2 || body.Images[0].View != "front" || body.Images[0].URL == nil ||
+		*body.Images[0].URL != "https://acc.blob.core.windows.net/c/products/"+pid+"/front-3f9a2c1d.jpg?sig=x" {
+		t.Fatalf("admin photos = %d %s", rec.Code, rec.Body)
+	}
+
+	off := NewAdminCatalogHandler(&fakeAdminCatalog{detail: d}, NewListCache(), &fakePhotos{off: true}, 5<<20)
+	rec = do(testRouter(catalogAdmin, http.MethodGet, "/admin/products/:id", off.Get), http.MethodGet, "/admin/products/"+pid, "")
+	if !strings.Contains(rec.Body.String(), `"url":null`) || !strings.Contains(rec.Body.String(), `"path":"products/`+pid+`/front-3f9a2c1d.jpg"`) {
+		t.Fatalf("photos off = %s", rec.Body)
 	}
 }
 

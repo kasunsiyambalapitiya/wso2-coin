@@ -239,14 +239,14 @@ func (q *Queries) DeleteProductVariants(ctx context.Context, productID string) e
 }
 
 const firstImagesForProducts = `-- name: FirstImagesForProducts :many
-SELECT product_id, url FROM swag_product_images
+SELECT product_id, path FROM swag_product_images
 WHERE product_id IN (/*SLICE:product_ids*/?)
 ORDER BY product_id, sort, id
 `
 
 type FirstImagesForProductsRow struct {
 	ProductID string
-	Url       string
+	Path      string
 }
 
 func (q *Queries) FirstImagesForProducts(ctx context.Context, productIds []string) ([]FirstImagesForProductsRow, error) {
@@ -268,7 +268,7 @@ func (q *Queries) FirstImagesForProducts(ctx context.Context, productIds []strin
 	var items []FirstImagesForProductsRow
 	for rows.Next() {
 		var i FirstImagesForProductsRow
-		if err := rows.Scan(&i.ProductID, &i.Url); err != nil {
+		if err := rows.Scan(&i.ProductID, &i.Path); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -393,13 +393,14 @@ func (q *Queries) InsertAlternative(ctx context.Context, arg InsertAlternativePa
 }
 
 const insertImage = `-- name: InsertImage :exec
-INSERT INTO swag_product_images (id, product_id, url, alt, option_value_id, sort) VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO swag_product_images (id, product_id, photo_view, path, alt, option_value_id, sort) VALUES (?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertImageParams struct {
 	ID            string
 	ProductID     string
-	Url           string
+	PhotoView     string
+	Path          string
 	Alt           string
 	OptionValueID sql.NullString
 	Sort          int32
@@ -409,7 +410,8 @@ func (q *Queries) InsertImage(ctx context.Context, arg InsertImageParams) error 
 	_, err := q.db.ExecContext(ctx, insertImage,
 		arg.ID,
 		arg.ProductID,
-		arg.Url,
+		arg.PhotoView,
+		arg.Path,
 		arg.Alt,
 		arg.OptionValueID,
 		arg.Sort,
@@ -639,7 +641,7 @@ func (q *Queries) ListCategories(ctx context.Context) ([]Category, error) {
 }
 
 const listImagesByProduct = `-- name: ListImagesByProduct :many
-SELECT id, product_id, url, alt, option_value_id, sort FROM swag_product_images WHERE product_id = ? ORDER BY sort, id
+SELECT id, product_id, photo_view, path, alt, option_value_id, sort FROM swag_product_images WHERE product_id = ? ORDER BY sort, id
 `
 
 func (q *Queries) ListImagesByProduct(ctx context.Context, productID string) ([]ProductImage, error) {
@@ -654,7 +656,8 @@ func (q *Queries) ListImagesByProduct(ctx context.Context, productID string) ([]
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProductID,
-			&i.Url,
+			&i.PhotoView,
+			&i.Path,
 			&i.Alt,
 			&i.OptionValueID,
 			&i.Sort,

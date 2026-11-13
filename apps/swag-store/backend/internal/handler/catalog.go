@@ -88,11 +88,12 @@ type CatalogHandler struct {
 	store    CatalogReader
 	cache    *ListCache
 	lowStock int
+	photos   PhotoURLs
 }
 
 // NewCatalogHandler builds the handler.
-func NewCatalogHandler(s CatalogReader, cache *ListCache, lowStock int) *CatalogHandler {
-	return &CatalogHandler{store: s, cache: cache, lowStock: lowStock}
+func NewCatalogHandler(s CatalogReader, cache *ListCache, lowStock int, photos PhotoURLs) *CatalogHandler {
+	return &CatalogHandler{store: s, cache: cache, lowStock: lowStock, photos: photos}
 }
 
 type categoryJSON struct {
@@ -126,12 +127,7 @@ type productCardJSON struct {
 }
 
 func (h *CatalogHandler) card(p repository.ProductCard) productCardJSON {
-	var img *string
-	if p.ImageURL != "" {
-		u := p.ImageURL
-		img = &u
-	}
-	return productCardJSON{ID: p.ID, Slug: p.Slug, Name: p.Name, Price: p.Price, Image: img, Status: p.Status,
+	return productCardJSON{ID: p.ID, Slug: p.Slug, Name: p.Name, Price: p.Price, Image: photoURL(h.photos, p.ImagePath), Status: p.Status,
 		Availability: catalog.AvailabilityOf(p.MaxFree, h.lowStock, catalog.RestockPolicy(p.RestockPolicy))}
 }
 
@@ -202,11 +198,6 @@ type variantJSON struct {
 	Availability   catalog.Availability `json:"availability"`
 	StockLeft      *int                 `json:"stockLeft"`
 	RestockETA     *string              `json:"restockEta"`
-}
-
-type imageJSON struct {
-	URL string `json:"url"`
-	Alt string `json:"alt"`
 }
 
 type productDetailJSON struct {
@@ -300,8 +291,6 @@ func (h *CatalogHandler) Product(c *gin.Context) {
 			out.Options = append(out.Options, oj)
 		}
 	}
-	for _, im := range d.Images {
-		out.Images = append(out.Images, imageJSON{URL: im.URL, Alt: im.Alt})
-	}
+	out.Images = imagesJSON(h.photos, d.Images)
 	writeJSON(c, http.StatusOK, out)
 }

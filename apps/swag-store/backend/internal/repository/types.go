@@ -59,7 +59,7 @@ type CartItem struct {
 	MaxPerUser    *int
 	PaidUnits     int // units of this product already ordered within the limit window
 	RestockETA    *time.Time
-	ImageURL      string
+	ImagePath     string // the first photo's blob path; empty when none
 	AddedAt       time.Time
 }
 

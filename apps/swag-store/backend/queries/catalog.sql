@@ -154,7 +154,7 @@ SELECT COUNT(*) FROM swag_variants WHERE sku = ?;
 SELECT * FROM swag_product_images WHERE product_id = ? ORDER BY sort, id;
 
 -- name: InsertImage :exec
-INSERT INTO swag_product_images (id, product_id, url, alt, option_value_id, sort) VALUES (?, ?, ?, ?, ?, ?);
+INSERT INTO swag_product_images (id, product_id, photo_view, path, alt, option_value_id, sort) VALUES (?, ?, ?, ?, ?, ?, ?);
 
 -- name: ListAlternativeIDs :many
 SELECT alternative_id FROM swag_product_alternatives WHERE product_id = ? ORDER BY sort;
@@ -201,7 +201,7 @@ WHERE vov.variant_id IN (sqlc.slice(variant_ids))
 ORDER BY vov.variant_id, o.sort, o.name;
 
 -- name: FirstImagesForProducts :many
-SELECT product_id, url FROM swag_product_images
+SELECT product_id, path FROM swag_product_images
 WHERE product_id IN (sqlc.slice(product_ids))
 ORDER BY product_id, sort, id;
 

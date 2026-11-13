@@ -20,7 +20,6 @@ package catalog
 
 import (
 	"fmt"
-	"net/url"
 	"strings"
 )
 
@@ -149,27 +148,6 @@ func VariantMatrix(values [][]string) [][]string {
 
 // OptionsLabel joins option values for display: "Black · M".
 func OptionsLabel(values []string) string { return strings.Join(values, " · ") }
-
-// ValidImageURL accepts https URLs on an allowed host, with no credentials or
-// port. "*.example.com" matches any subdomain, never example.com itself.
-func ValidImageURL(raw string, hosts []string) bool {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "https" || u.User != nil || u.Port() != "" || u.Hostname() == "" {
-		return false
-	}
-	host := strings.ToLower(u.Hostname())
-	for _, h := range hosts {
-		h = strings.ToLower(strings.TrimSpace(h))
-		if suffix, ok := strings.CutPrefix(h, "*."); ok {
-			if strings.HasSuffix(host, "."+suffix) {
-				return true
-			}
-		} else if host == h {
-			return true
-		}
-	}
-	return false
-}
 
 // Slugify makes a URL slug: lower-case ASCII letters and digits joined by "-".
 func Slugify(s string) string {

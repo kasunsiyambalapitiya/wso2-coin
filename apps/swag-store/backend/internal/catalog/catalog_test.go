@@ -87,27 +87,6 @@ func TestVariantMatrix(t *testing.T) {
 	}
 }
 
-func TestValidImageURL(t *testing.T) {
-	hosts := []string{"*.wso2.com", "wso2.cachefly.net"}
-	cases := map[string]bool{
-		"https://wso2.cachefly.net/a.png":      true,
-		"https://cdn.wso2.com/a.png":           true,
-		"https://a.b.wso2.com/a.png":           true,
-		"https://wso2.com/a.png":               false,
-		"http://cdn.wso2.com/a.png":            false,
-		"https://evilwso2.com/a.png":           false,
-		"https://cdn.wso2.com.evil.net/a.png":  false,
-		"javascript:alert(1)":                  false,
-		"https://user@cdn.wso2.com/a.png":      false,
-		"https://wso2.cachefly.net:8443/a.png": false,
-	}
-	for u, want := range cases {
-		if got := ValidImageURL(u, hosts); got != want {
-			t.Errorf("ValidImageURL(%q) = %v, want %v", u, got, want)
-		}
-	}
-}
-
 func TestSlugify(t *testing.T) {
 	cases := map[string]string{
 		"WSO2 Hoodie":           "wso2-hoodie",

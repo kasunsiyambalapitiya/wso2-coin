@@ -42,11 +42,12 @@ type CartStore interface {
 type CartHandler struct {
 	store    CartStore
 	lowStock int
+	photos   PhotoURLs
 }
 
 // NewCartHandler builds the handler.
-func NewCartHandler(s CartStore, lowStock int) *CartHandler {
-	return &CartHandler{store: s, lowStock: lowStock}
+func NewCartHandler(s CartStore, lowStock int, photos PhotoURLs) *CartHandler {
+	return &CartHandler{store: s, lowStock: lowStock, photos: photos}
 }
 
 type cartLineJSON struct {
@@ -84,7 +85,7 @@ func (h *CartHandler) Get(c *gin.Context) {
 	for i, it := range items {
 		state, reason := results[i].State, results[i].Reason
 		line := cartLineJSON{ID: it.LineID, VariantID: it.VariantID, ProductSlug: it.Slug, Name: it.Name, Options: it.Options,
-			Image: strPtr(it.ImageURL), UnitPrice: it.UnitPrice, Quantity: it.Quantity, LineTotal: it.UnitPrice * int64(it.Quantity),
+			Image: photoURL(h.photos, it.ImagePath), UnitPrice: it.UnitPrice, Quantity: it.Quantity, LineTotal: it.UnitPrice * int64(it.Quantity),
 			State: state, Reason: strPtr(reason),
 			Availability: catalog.AvailabilityOf(it.Free, h.lowStock, catalog.RestockPolicy(it.RestockPolicy))}
 		out.ItemCount += it.Quantity

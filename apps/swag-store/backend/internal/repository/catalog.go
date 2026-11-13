@@ -83,7 +83,7 @@ type ProductCard struct {
 	Price         int64 // lowest price over active variants
 	MaxFree       int   // most free stock of any active variant
 	UnitsSold     int
-	ImageURL      string
+	ImagePath     string // the first photo's blob path, in view order; empty when none
 	PublishedAt   *time.Time
 	CreatedAt     time.Time
 }
@@ -175,7 +175,7 @@ func (s *Store) queryCards(ctx context.Context, query string, args ...any) ([]Pr
 		return nil, err
 	}
 	for i := range out {
-		out[i].ImageURL = images[out[i].ID]
+		out[i].ImagePath = images[out[i].ID]
 	}
 	return out, nil
 }
@@ -213,7 +213,8 @@ type Variant struct {
 // Image is a product image.
 type Image struct {
 	ID            string
-	URL           string
+	View          string // front, back, … (catalog.PhotoViews)
+	Path          string // blob path in the photo container
 	Alt           string
 	OptionValueID string
 	Sort          int
@@ -333,7 +334,7 @@ func (s *Store) detail(ctx context.Context, q *store.Queries, p store.Product) (
 		return nil, err
 	}
 	for _, im := range images {
-		d.Images = append(d.Images, Image{ID: im.ID, URL: im.Url, Alt: im.Alt, OptionValueID: im.OptionValueID.String, Sort: int(im.Sort)})
+		d.Images = append(d.Images, Image{ID: im.ID, View: im.PhotoView, Path: im.Path, Alt: im.Alt, OptionValueID: im.OptionValueID.String, Sort: int(im.Sort)})
 	}
 	if d.Alternatives, err = s.alternatives(ctx, q, p); err != nil {
 		return nil, err

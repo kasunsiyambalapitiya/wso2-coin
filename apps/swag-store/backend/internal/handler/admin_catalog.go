@@ -23,6 +23,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -54,15 +55,16 @@ type AdminCatalogStore interface {
 
 // AdminCatalogHandler serves the Catalog Manager's routes.
 type AdminCatalogHandler struct {
-	store      AdminCatalogStore
-	cache      *ListCache
-	imageHosts []string
+	store     AdminCatalogStore
+	cache     *ListCache
+	photos    PhotoStore
+	maxUpload int64
 }
 
 // NewAdminCatalogHandler builds the handler. Every write clears the shop's
-// 60 s product-list cache.
-func NewAdminCatalogHandler(s AdminCatalogStore, cache *ListCache, imageHosts []string) *AdminCatalogHandler {
-	return &AdminCatalogHandler{store: s, cache: cache, imageHosts: imageHosts}
+// 60 s product-list cache. maxUploadBytes caps one photo.
+func NewAdminCatalogHandler(s AdminCatalogStore, cache *ListCache, photos PhotoStore, maxUploadBytes int64) *AdminCatalogHandler {
+	return &AdminCatalogHandler{store: s, cache: cache, photos: photos, maxUpload: maxUploadBytes}
 }
 
 var (
@@ -121,7 +123,7 @@ type adminProductJSON struct {
 	Alternatives    []string           `json:"alternatives"`
 }
 
-func adminProduct(d *repository.ProductDetail) adminProductJSON {
+func (h *AdminCatalogHandler) adminProduct(d *repository.ProductDetail) adminProductJSON {
 	p := d.Product
 	out := adminProductJSON{ID: p.ID, Slug: p.Slug, Name: p.Name, Description: p.Description, CategoryID: strPtr(p.CategoryID),
 		Price: p.Price, RestockPolicy: p.RestockPolicy, MaxPerUser: p.MaxPerUser, LimitWindowDays: p.LimitWindowDays,
@@ -139,9 +141,7 @@ func adminProduct(d *repository.ProductDetail) adminProductJSON {
 			PriceDelta: v.PriceDelta, OnHand: v.OnHand, Reserved: v.Reserved, Free: v.Free,
 			RestockETA: dateString(v.RestockETA), Active: v.Active})
 	}
-	for _, im := range d.Images {
-		out.Images = append(out.Images, imageJSON{URL: im.URL, Alt: im.Alt})
-	}
+	out.Images = imagesJSON(h.photos, d.Images)
 	out.Alternatives = append(out.Alternatives, d.CuratedAlternativeIDs...)
 	return out
 }
@@ -166,7 +166,7 @@ func (h *AdminCatalogHandler) List(c *gin.Context) {
 	items := make([]gin.H, 0, len(cards))
 	for _, p := range cards {
 		items = append(items, gin.H{"id": p.ID, "slug": p.Slug, "name": p.Name, "status": p.Status, "price": p.Price,
-			"image": strPtr(p.ImageURL), "freeStock": p.MaxFree, "unitsSold30d": p.UnitsSold})
+			"image": photoURL(h.photos, p.ImagePath), "freeStock": p.MaxFree, "unitsSold30d": p.UnitsSold})
 	}
 	writeJSON(c, http.StatusOK, gin.H{"items": items, "total": total})
 }
@@ -186,12 +186,16 @@ func (h *AdminCatalogHandler) Get(c *gin.Context) {
 		writeError(c, http.StatusNotFound, ErrMsgNotFound)
 		return
 	}
-	writeJSON(c, http.StatusOK, adminProduct(d))
+	writeJSON(c, http.StatusOK, h.adminProduct(d))
 }
 
+// imageBody is one saved photo. url is what the API sent out; it is accepted
+// so a product can be sent back as it came, and ignored.
 type imageBody struct {
-	URL string `json:"url"`
-	Alt string `json:"alt"`
+	View string  `json:"view"`
+	Path string  `json:"path"`
+	Alt  string  `json:"alt"`
+	URL  *string `json:"url"`
 }
 
 // productBody is POST /admin/products and the field form of PATCH. Status
@@ -217,8 +221,9 @@ func (b *productBody) fieldsSet() bool {
 		b.RestockPolicy != nil || b.raw["maxPerUser"] != nil || b.raw["limitWindowDays"] != nil || b.Images != nil || b.Alternatives != nil
 }
 
-// apply copies the set fields onto in and checks the result.
-func (h *AdminCatalogHandler) apply(b *productBody, in *repository.ProductInput) error {
+// apply copies the set fields onto in and checks the result. productID is
+// empty for a new product, which can't have photos yet.
+func (h *AdminCatalogHandler) apply(b *productBody, in *repository.ProductInput, productID string) error {
 	if b.Name != nil {
 		in.Name = strings.TrimSpace(*b.Name)
 	}
@@ -250,9 +255,12 @@ func (h *AdminCatalogHandler) apply(b *productBody, in *repository.ProductInput)
 		in.LimitWindowDays = b.LimitWindowDays
 	}
 	if b.Images != nil {
+		if productID == "" && len(*b.Images) > 0 {
+			return errors.New("Save the product before adding photos.")
+		}
 		in.Images = nil
 		for _, im := range *b.Images {
-			in.Images = append(in.Images, repository.ImageInput{URL: strings.TrimSpace(im.URL), Alt: strings.TrimSpace(im.Alt)})
+			in.Images = append(in.Images, repository.ImageInput{View: im.View, Path: im.Path, Alt: strings.TrimSpace(im.Alt)})
 		}
 	}
 	if b.Alternatives != nil {
@@ -283,14 +291,27 @@ func (h *AdminCatalogHandler) apply(b *productBody, in *repository.ProductInput)
 	case len(in.Alternatives) > 8:
 		return errors.New("at most 8 alternatives.")
 	}
+	seen := map[string]bool{}
 	for _, im := range in.Images {
-		if !catalog.ValidImageURL(im.URL, h.imageHosts) || len(im.URL) > 2048 {
-			return errors.New("image URLs must be https on an allowed host.")
+		if _, ok := catalog.PhotoRank(im.View); !ok {
+			return errors.New("images: unknown view.")
+		}
+		if seen[im.View] {
+			return errors.New("images: each view at most once.")
+		}
+		seen[im.View] = true
+		if !catalog.ValidPhotoPath(productID, im.View, im.Path) {
+			return errors.New("images: a photo path doesn't match this product and view.")
 		}
 		if utf8.RuneCountInString(im.Alt) > 300 {
 			return errors.New("image alt text is at most 300 characters.")
 		}
 	}
+	slices.SortStableFunc(in.Images, func(a, b repository.ImageInput) int {
+		ra, _ := catalog.PhotoRank(a.View)
+		rb, _ := catalog.PhotoRank(b.View)
+		return ra - rb
+	})
 	for _, a := range in.Alternatives {
 		if !uuidRe.MatchString(a) {
 			return errors.New("alternatives must be product UUIDs.")
@@ -323,7 +344,7 @@ func (h *AdminCatalogHandler) Create(c *gin.Context) {
 		return
 	}
 	in := repository.ProductInput{RestockPolicy: string(catalog.Restockable)}
-	if err := h.apply(b, &in); err != nil {
+	if err := h.apply(b, &in, ""); err != nil {
 		writeError(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -332,7 +353,7 @@ func (h *AdminCatalogHandler) Create(c *gin.Context) {
 		h.writeStoreError(c, "admin products: create failed", err)
 		return
 	}
-	writeJSON(c, http.StatusCreated, adminProduct(d))
+	writeJSON(c, http.StatusCreated, h.adminProduct(d))
 }
 
 // Patch edits fields, or changes status: DRAFT→ACTIVE publishes, ACTIVE→REMOVED
@@ -381,7 +402,7 @@ func (h *AdminCatalogHandler) Patch(c *gin.Context) {
 	// another field is kept.
 	var invalid error
 	d, err := h.store.UpdateProduct(ctx, actorOf(c), id, func(in *repository.ProductInput) error {
-		invalid = h.apply(b, in)
+		invalid = h.apply(b, in, id)
 		return invalid
 	})
 	if invalid != nil {
@@ -393,7 +414,7 @@ func (h *AdminCatalogHandler) Patch(c *gin.Context) {
 		return
 	}
 	h.cache.Clear()
-	writeJSON(c, http.StatusOK, adminProduct(d))
+	writeJSON(c, http.StatusOK, h.adminProduct(d))
 }
 
 func (h *AdminCatalogHandler) respondProduct(c *gin.Context, id string) {
@@ -406,7 +427,7 @@ func (h *AdminCatalogHandler) respondProduct(c *gin.Context, id string) {
 		writeError(c, http.StatusNotFound, ErrMsgNotFound)
 		return
 	}
-	writeJSON(c, http.StatusOK, adminProduct(d))
+	writeJSON(c, http.StatusOK, h.adminProduct(d))
 }
 
 // Delete removes a DRAFT that was never ordered.
@@ -505,7 +526,7 @@ func (h *AdminCatalogHandler) SetOptions(c *gin.Context) {
 		return
 	}
 	h.cache.Clear()
-	writeJSON(c, http.StatusOK, adminProduct(d))
+	writeJSON(c, http.StatusOK, h.adminProduct(d))
 }
 
 type variantBody struct {

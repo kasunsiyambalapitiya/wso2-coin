@@ -85,9 +85,6 @@ func TestLoadConfigDefaults(t *testing.T) {
 			t.Errorf("DSN missing %q: %s", want, cfg.DatabaseDSN)
 		}
 	}
-	if len(cfg.ImageHosts) != 3 {
-		t.Fatalf("image hosts = %v", cfg.ImageHosts)
-	}
 }
 
 func TestLoadConfigNamesEveryMissingVar(t *testing.T) {

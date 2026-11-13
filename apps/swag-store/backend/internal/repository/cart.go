@@ -69,7 +69,7 @@ func (s *Store) cartItems(ctx context.Context, q *store.Queries, email string) (
 			Options: labels[r.VariantID], Quantity: int(r.Quantity), UnitPrice: r.PriceCoins + r.PriceDeltaCoins,
 			Free: int(r.StockOnHand - r.StockReserved), ProductStatus: string(r.ProductStatus), VariantActive: r.VariantActive,
 			RestockPolicy: string(r.RestockPolicy), MaxPerUser: maxPer, PaidUnits: paid[r.ProductID],
-			RestockETA: timePtr(r.RestockEta), ImageURL: images[r.ProductID], AddedAt: r.AddedAt,
+			RestockETA: timePtr(r.RestockEta), ImagePath: images[r.ProductID], AddedAt: r.AddedAt,
 		})
 	}
 	return items, nil
@@ -116,7 +116,7 @@ func (s *Store) firstImages(ctx context.Context, q *store.Queries, productIDs []
 	}
 	for _, r := range rows {
 		if _, ok := out[r.ProductID]; !ok {
-			out[r.ProductID] = r.Url
+			out[r.ProductID] = r.Path
 		}
 	}
 	return out, nil

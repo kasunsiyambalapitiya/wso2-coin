@@ -443,7 +443,8 @@ type ProductAlternative struct {
 type ProductImage struct {
 	ID            string
 	ProductID     string
-	Url           string
+	PhotoView     string
+	Path          string
 	Alt           string
 	OptionValueID sql.NullString
 	Sort          int32

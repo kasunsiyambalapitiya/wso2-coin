@@ -48,6 +48,31 @@ func testRouter(user *reqctx.User, method, path string, h gin.HandlerFunc) *gin.
 	return r
 }
 
+// fakePhotos signs every photo with a fixed query, or nothing when off.
+type fakePhotos struct {
+	off     bool
+	puts    []string
+	putErrs []error // returned in order by Put; nil once used up
+}
+
+func (f *fakePhotos) ReadURL(path string) *string {
+	if f.off {
+		return nil
+	}
+	u := "https://acc.blob.core.windows.net/c/" + path + "?sig=x"
+	return &u
+}
+
+func (f *fakePhotos) Put(_ context.Context, path string, _ []byte, _ string) error {
+	f.puts = append(f.puts, path)
+	if len(f.putErrs) > 0 {
+		err := f.putErrs[0]
+		f.putErrs = f.putErrs[1:]
+		return err
+	}
+	return nil
+}
+
 func do(r *gin.Engine, method, path, body string, headers ...string) *httptest.ResponseRecorder {
 	var rd io.Reader
 	if body != "" {

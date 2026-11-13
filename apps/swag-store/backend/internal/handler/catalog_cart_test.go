@@ -53,7 +53,7 @@ func TestProductListCachedAndCleared(t *testing.T) {
 	cache := NewListCache()
 	now := time.Unix(0, 0)
 	cache.now = func() time.Time { return now }
-	h := NewCatalogHandler(f, cache, 5)
+	h := NewCatalogHandler(f, cache, 5, &fakePhotos{})
 	r := testRouter(shopper, http.MethodGet, "/products", h.Products)
 
 	rec := do(r, http.MethodGet, "/products?sort=price_asc", "")
@@ -88,7 +88,7 @@ func TestRemovedProductShowsAlternativesOnly(t *testing.T) {
 		Variants:     []repository.Variant{{ID: "v1", Active: true, Free: 3}},
 		Alternatives: []repository.ProductCard{{ID: "p2", Slug: "tumbler", Name: "Tumbler", MaxFree: 10}},
 	}}
-	h := NewCatalogHandler(f, NewListCache(), 5)
+	h := NewCatalogHandler(f, NewListCache(), 5, &fakePhotos{})
 	r := testRouter(shopper, http.MethodGet, "/products/:slug", h.Product)
 	rec := do(r, http.MethodGet, "/products/hoodie", "")
 	body := decode[map[string]any](t, rec)
@@ -113,7 +113,7 @@ func TestProductDetailHidesInactiveVariants(t *testing.T) {
 			{ID: "v2", SKU: "H-M", Active: false, Free: 9, ValueIDs: []string{"m"}},
 		},
 	}}
-	h := NewCatalogHandler(f, NewListCache(), 5)
+	h := NewCatalogHandler(f, NewListCache(), 5, &fakePhotos{})
 	rec := do(testRouter(shopper, http.MethodGet, "/products/:slug", h.Product), http.MethodGet, "/products/hoodie", "")
 	s := rec.Body.String()
 	if rec.Code != 200 || strings.Contains(s, "H-M") || strings.Contains(s, `"value":"M"`) || !strings.Contains(s, `"availability":"OUT_OF_STOCK"`) {
@@ -142,7 +142,7 @@ func TestCartTotalsOnlyOrderableLines(t *testing.T) {
 		{LineID: "l1", Name: "Hoodie", UnitPrice: 90, Quantity: 2, Free: 5, ProductStatus: "ACTIVE", VariantActive: true},
 		{LineID: "l2", Name: "Umbrella", UnitPrice: 40, Quantity: 1, Free: 5, ProductStatus: "REMOVED", VariantActive: true},
 	}}
-	h := NewCartHandler(f, 5)
+	h := NewCartHandler(f, 5, &fakePhotos{})
 	rec := do(testRouter(shopper, http.MethodGet, "/cart", h.Get), http.MethodGet, "/cart", "")
 	body := decode[map[string]any](t, rec)
 	if rec.Code != 200 || body["total"] != float64(180) || body["itemCount"] != float64(3) {
@@ -155,7 +155,7 @@ func TestCartTotalsOnlyOrderableLines(t *testing.T) {
 
 func TestCartWrites(t *testing.T) {
 	const line = "/cart/lines/0192f3a4-0000-7000-8000-0000000000cc"
-	h := NewCartHandler(&fakeCart{addErr: repository.ErrNotAvailable}, 5)
+	h := NewCartHandler(&fakeCart{addErr: repository.ErrNotAvailable}, 5, &fakePhotos{})
 	rec := do(testRouter(shopper, http.MethodPost, "/cart/lines", h.AddLine), http.MethodPost, "/cart/lines",
 		`{"variantId":"0192f3a4-0000-7000-8000-0000000000cc","quantity":1}`)
 	if rec.Code != 409 || decode[errorBody](t, rec).ErrorCode != CodeNotAvailable {
@@ -166,11 +166,53 @@ func TestCartWrites(t *testing.T) {
 			t.Errorf("bad add %s = %d", body, rec.Code)
 		}
 	}
-	h = NewCartHandler(&fakeCart{ownErr: repository.ErrNotFound}, 5)
+	h = NewCartHandler(&fakeCart{ownErr: repository.ErrNotFound}, 5, &fakePhotos{})
 	if rec := do(testRouter(shopper, http.MethodDelete, "/cart/lines/:id", h.DeleteLine), http.MethodDelete, line, ""); rec.Code != 404 {
 		t.Fatalf("another user's line = %d", rec.Code)
 	}
 	if rec := do(testRouter(shopper, http.MethodPatch, "/cart/lines/:id", h.UpdateLine), http.MethodPatch, line, `{"quantity":2}`); rec.Code != 404 {
 		t.Fatalf("another user's line = %d", rec.Code)
+	}
+}
+
+func TestShopperPhotoURLs(t *testing.T) {
+	const id = "0192f3a4-0000-7000-8000-0000000000d1"
+	f := &fakeCatalog{
+		cards: []repository.ProductCard{{ID: id, Slug: "hoodie", Name: "WSO2 Hoodie", Price: 90, MaxFree: 9,
+			RestockPolicy: "RESTOCKABLE", ImagePath: "products/" + id + "/front-3f9a2c1d.jpg"}},
+		detail: &repository.ProductDetail{Product: repository.Product{ID: id, Slug: "hoodie", Name: "WSO2 Hoodie", Price: 90,
+			Status: "ACTIVE", RestockPolicy: "RESTOCKABLE"}, Images: []repository.Image{
+			{View: "back", Path: "products/" + id + "/back-0a1b2c3d.png"},
+			{View: "front", Path: "products/" + id + "/front-3f9a2c1d.jpg"},
+		}},
+	}
+	h := NewCatalogHandler(f, NewListCache(), 5, &fakePhotos{})
+	want := "https://acc.blob.core.windows.net/c/products/" + id + "/front-3f9a2c1d.jpg?sig=x"
+
+	rec := do(testRouter(shopper, http.MethodGet, "/products", h.Products), http.MethodGet, "/products", "")
+	if !strings.Contains(rec.Body.String(), `"image":"`+want+`"`) {
+		t.Fatalf("card = %s", rec.Body)
+	}
+	rec = do(testRouter(shopper, http.MethodGet, "/products/:slug", h.Product), http.MethodGet, "/products/hoodie", "")
+	body := decode[struct {
+		Images []struct {
+			View, Path string
+			URL        *string
+		} `json:"images"`
+	}](t, rec)
+	if len(body.Images) != 2 || body.Images[0].View != "front" || body.Images[0].URL == nil || *body.Images[0].URL != want {
+		t.Fatalf("detail = %s", rec.Body)
+	}
+
+	off := NewCatalogHandler(f, NewListCache(), 5, &fakePhotos{off: true})
+	rec = do(testRouter(shopper, http.MethodGet, "/products", off.Products), http.MethodGet, "/products", "")
+	if !strings.Contains(rec.Body.String(), `"image":null`) {
+		t.Fatalf("card with photos off = %s", rec.Body)
+	}
+	cart := NewCartHandler(&fakeCart{items: []repository.CartItem{{LineID: "l1", Name: "Hoodie", UnitPrice: 90, Quantity: 1, Free: 5,
+		ProductStatus: "ACTIVE", VariantActive: true, ImagePath: "products/" + id + "/front-3f9a2c1d.jpg"}}}, 5, &fakePhotos{})
+	rec = do(testRouter(shopper, http.MethodGet, "/cart", cart.Get), http.MethodGet, "/cart", "")
+	if !strings.Contains(rec.Body.String(), `"image":"`+want+`"`) {
+		t.Fatalf("cart = %s", rec.Body)
 	}
 }

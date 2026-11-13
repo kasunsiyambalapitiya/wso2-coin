@@ -66,7 +66,7 @@ func TestFilesRejectsBadNames(t *testing.T) {
 
 func TestEmbeddedMigrationsListed(t *testing.T) {
 	latest, err := Latest(migrations.FS)
-	if err != nil || latest != "0001_swag_store_schema.sql" {
+	if err != nil || latest != "0002_product_photo_paths.sql" {
 		t.Fatalf("latest = %q, %v", latest, err)
 	}
 }
