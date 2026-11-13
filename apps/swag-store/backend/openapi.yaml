@@ -720,6 +720,56 @@ paths:
           "$ref": "#/components/responses/Error"
         "404":
           "$ref": "#/components/responses/Error"
+  /admin/products/{id}/images:
+    post:
+      summary: "Upload one product photo"
+      description: "Stores one photo for a view and returns its blob path and a signed read URL. The product does not change until a PATCH saves `images`. The photo's type is read from its bytes: JPEG, PNG or WebP only, at most ASSETS_MAX_UPLOAD_BYTES (5 MiB by default)."
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: "object"
+              required: ["view", "file"]
+              properties:
+                view:
+                  "$ref": "#/components/schemas/PhotoView"
+                file:
+                  type: "string"
+                  format: "binary"
+            encoding:
+              file:
+                contentType: "image/jpeg, image/png, image/webp"
+      responses:
+        "201":
+          description: "Stored"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/PhotoUpload"
+        "400":
+          "$ref": "#/components/responses/Error"
+        "401":
+          "$ref": "#/components/responses/Error"
+        "403":
+          "$ref": "#/components/responses/Error"
+        "404":
+          "$ref": "#/components/responses/Error"
+        "409":
+          "$ref": "#/components/responses/Error"
+        "413":
+          "$ref": "#/components/responses/Error"
+        "415":
+          "$ref": "#/components/responses/Error"
+        "503":
+          "$ref": "#/components/responses/Error"
   /admin/products/{id}/options:
     put:
       summary: "Replace options and regenerate the variant matrix (keeps existing SKUs)"
@@ -1263,6 +1313,7 @@ components:
         image:
           type: "string"
           nullable: true
+          description: "Signed read-only URL of the first photo in view order"
         availability:
           "$ref": "#/components/schemas/Availability"
         status:
@@ -1327,13 +1378,50 @@ components:
           type: "string"
           format: "date"
           nullable: true
+    PhotoView:
+      type: "string"
+      description: "Photo slot, in gallery order. front is the main photo."
+      enum: ["front", "back", "left", "right", "top", "bottom", "detail-1", "detail-2", "detail-3", "detail-4"]
     Image:
       type: "object"
       properties:
+        view:
+          "$ref": "#/components/schemas/PhotoView"
+        path:
+          type: "string"
+          description: "Blob path: products/{productId}/{view}-{8 hex}.{jpg|png|webp}"
         url:
           type: "string"
+          nullable: true
+          description: "Signed read-only URL for this photo, valid at least 24 hours. Null when photos are off or can't be signed right now."
         alt:
           type: "string"
+    ImageInput:
+      type: "object"
+      required: ["view", "path"]
+      properties:
+        view:
+          "$ref": "#/components/schemas/PhotoView"
+        path:
+          type: "string"
+          description: "A path returned by the upload, for this product and view"
+        alt:
+          type: "string"
+          maxLength: 300
+        url:
+          type: "string"
+          description: "Ignored"
+      additionalProperties: false
+    PhotoUpload:
+      type: "object"
+      properties:
+        view:
+          "$ref": "#/components/schemas/PhotoView"
+        path:
+          type: "string"
+        url:
+          type: "string"
+          nullable: true
     ProductDetail:
       type: "object"
       properties:
@@ -1400,6 +1488,7 @@ components:
         image:
           type: "string"
           nullable: true
+          description: "Signed read-only URL of the first photo in view order"
         unitPrice:
           type: "integer"
           format: "int64"
@@ -1976,14 +2065,10 @@ components:
           nullable: true
         images:
           type: "array"
+          description: "One photo per view, at most 10. Not allowed when creating a product."
+          maxItems: 10
           items:
-            type: "object"
-            properties:
-              url:
-                type: "string"
-                description: "https on IMAGE_URL_HOSTS"
-              alt:
-                type: "string"
+            "$ref": "#/components/schemas/ImageInput"
         alternatives:
           type: "array"
           items:

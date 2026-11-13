@@ -1,0 +1,29 @@
+$kind: http-request
+description: |-
+  Uploads one photo for a view (front, back, left, right, top, bottom, detail-1 … detail-4). JPEG, PNG or WebP, at most 5 MB.
+  Returns its blob path and a signed read URL; the product changes only when Edit product saves `images`.
+  Pick a local photo for the `file` field before sending.
+method: POST
+url: '{{baseUrl}}/admin/products/:id/images'
+pathVariables:
+- key: id
+  value: '{{adminProductId}}'
+body:
+  type: formdata
+  content:
+  - key: view
+    type: text
+    value: front
+  - key: file
+    type: file
+    src: ''
+scripts:
+- type: afterResponse
+  code: |-
+    pm.test('Status is 201', () => pm.response.to.have.status(201));
+    pm.test('Path names this product and view', () => {
+      const body = pm.response.json();
+      pm.expect(body.path).to.match(new RegExp('^products/' + pm.variables.get('adminProductId') + '/front-[0-9a-f]{8}\\.(jpg|png|webp)$'));
+    });
+  language: text/javascript
+order: 4500

@@ -74,6 +74,7 @@ var expectedPerms = map[string]handler.Permission{
 	"PATCH /admin/products/:id":                     catalog,
 	"DELETE /admin/products/:id":                    catalog,
 	"GET /admin/products/:id/removal-impact":        catalog,
+	"POST /admin/products/:id/images":               catalog,
 	"PUT /admin/products/:id/options":               catalog,
 	"PATCH /admin/products/:id/variants/:variantId": catalog,
 	"POST /admin/variants/:id/stock-movements":      catalog,

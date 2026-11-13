@@ -1,5 +1,5 @@
 $kind: http-request
-description: Creates a DRAFT with one default variant. Slugs are unique, so the example adds a timestamp.
+description: Creates a DRAFT with one default variant. Slugs are unique, so the example adds a timestamp. Photos come after, through Upload photo.
 method: POST
 url: '{{baseUrl}}/admin/products'
 headers:
@@ -17,12 +17,7 @@ body:
       "restockPolicy": "RESTOCKABLE",
       "maxPerUser": 2,
       "limitWindowDays": 30,
-      "images": [
-        {
-          "url": "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/wso2-logo.png",
-          "alt": "WSO2 Water Bottle"
-        }
-      ],
+      "images": [],
       "alternatives": []
     }
 scripts:

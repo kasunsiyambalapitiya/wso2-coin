@@ -111,6 +111,7 @@ func routeTable(a *app) []routeDef {
 		{patch, "/admin/products/:id", permCatalog, limitAdmin, a.adminCatalog.Patch},
 		{del, "/admin/products/:id", permCatalog, limitAdmin, a.adminCatalog.Delete},
 		{get, "/admin/products/:id/removal-impact", permCatalog, nil, a.adminCatalog.RemovalImpact},
+		{post, "/admin/products/:id/images", permCatalog, limitAdmin, a.adminCatalog.UploadImage},
 		{put, "/admin/products/:id/options", permCatalog, limitAdmin, a.adminCatalog.SetOptions},
 		{patch, "/admin/products/:id/variants/:variantId", permCatalog, limitAdmin, a.adminCatalog.PatchVariant},
 		{post, "/admin/variants/:id/stock-movements", permCatalog, limitAdmin, a.adminCatalog.StockMovement},

@@ -55,19 +55,22 @@ const (
 
 // Stable error codes (snake_case).
 const (
-	CodeNotWSO2           = "not_wso2"
-	CodeWalletNotOwned    = "wallet_not_owned"
-	CodeNotActiveEmployee = "not_active_employee"
-	CodeInsufficientFunds = "insufficient_funds"
-	CodePaymentFailed     = "payment_failed"
-	CodeQuoteChanged      = "quote_changed"
-	CodeOutOfStock        = "out_of_stock"
-	CodeNotAvailable      = "not_available"
-	CodeLimitReached      = "limit_reached"
-	CodeStateConflict     = "state_conflict"
-	CodeHRUnavailable     = "hr_unavailable"
-	CodeCoinsUnavailable  = "coins_unavailable"
-	CodePaymentsPaused    = "payments_paused"
+	CodeNotWSO2             = "not_wso2"
+	CodeWalletNotOwned      = "wallet_not_owned"
+	CodeNotActiveEmployee   = "not_active_employee"
+	CodeInsufficientFunds   = "insufficient_funds"
+	CodePaymentFailed       = "payment_failed"
+	CodeQuoteChanged        = "quote_changed"
+	CodeOutOfStock          = "out_of_stock"
+	CodeNotAvailable        = "not_available"
+	CodeLimitReached        = "limit_reached"
+	CodeStateConflict       = "state_conflict"
+	CodeHRUnavailable       = "hr_unavailable"
+	CodeCoinsUnavailable    = "coins_unavailable"
+	CodePaymentsPaused      = "payments_paused"
+	CodeUnsupportedImage    = "unsupported_image"
+	CodeAssetsNotConfigured = "assets_not_configured"
+	CodeAssetsUnavailable   = "assets_unavailable"
 )
 
 type errorBody struct {

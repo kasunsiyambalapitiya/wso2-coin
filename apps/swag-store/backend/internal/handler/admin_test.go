@@ -128,6 +128,12 @@ type fakeAdminCatalog struct {
 	created   *repository.ProductInput
 	moveErr   error
 	updateErr error // UpdateProduct and UpdateVariant
+	uploads   []repository.PhotoUploadDetail
+}
+
+func (f *fakeAdminCatalog) RecordPhotoUpload(_ context.Context, _ repository.Actor, _ string, d repository.PhotoUploadDetail) error {
+	f.uploads = append(f.uploads, d)
+	return nil
 }
 
 func (f *fakeAdminCatalog) SearchProducts(context.Context, repository.ProductQuery) ([]repository.ProductCard, int, error) {

@@ -51,6 +51,7 @@ type AdminCatalogStore interface {
 	SaveCategory(ctx context.Context, a repository.Actor, c repository.Category) (*repository.Category, error)
 	DeleteCategory(ctx context.Context, a repository.Actor, id string) error
 	Demand(ctx context.Context) ([]repository.DemandRow, error)
+	RecordPhotoUpload(ctx context.Context, a repository.Actor, productID string, d repository.PhotoUploadDetail) error
 }
 
 // AdminCatalogHandler serves the Catalog Manager's routes.
