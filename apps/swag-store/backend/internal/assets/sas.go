@@ -28,8 +28,9 @@ import (
 
 const (
 	day = 24 * time.Hour
-	// One read SAS per UTC day, from 15 minutes before that day's midnight to
-	// 48 hours after it: a URL handed out at any time works for at least 24 h.
+	// Each photo gets one read SAS per UTC day, for that blob only, from 15
+	// minutes before that day's midnight to 48 hours after it: a URL handed out
+	// at any time works for at least 24 h, and stays the same all day.
 	sasLead     = 15 * time.Minute
 	sasLifetime = 48 * time.Hour
 	// Delegation keys: Azure allows 7 days. The key starts before today's
@@ -51,7 +52,7 @@ func (c *Client) ReadURL(path string) *string {
 		slog.Warn("assets_bad_path", "path", path)
 		return nil
 	}
-	q := c.daySAS()
+	q := c.daySAS(path)
 	if q == "" {
 		return nil
 	}
@@ -59,14 +60,17 @@ func (c *Client) ReadURL(path string) *string {
 	return &u
 }
 
-// daySAS is today's container read SAS, signed once per UTC day.
-func (c *Client) daySAS() string {
+// daySAS is today's read SAS for one blob, signed once per photo per UTC day.
+func (c *Client) daySAS(path string) string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.clock().UTC()
 	today := now.Truncate(day)
-	if c.sasQuery != "" && c.sasDay.Equal(today) {
-		return c.sasQuery
+	if !c.sasDay.Equal(today) || c.sasQuery == nil {
+		c.sasDay, c.sasQuery = today, map[string]string{}
+	}
+	if q, ok := c.sasQuery[path]; ok {
+		return q
 	}
 	expiry := today.Add(sasLifetime)
 	if c.sign == nil || (!c.signUntil.IsZero() && c.signUntil.Before(expiry)) {
@@ -76,15 +80,16 @@ func (c *Client) daySAS() string {
 		Protocol:      c.protocol,
 		StartTime:     today.Add(-sasLead),
 		ExpiryTime:    expiry,
-		Permissions:   (&sas.ContainerPermissions{Read: true}).String(),
+		Permissions:   (&sas.BlobPermissions{Read: true}).String(),
 		ContainerName: c.container,
+		BlobName:      path,
 	})
 	if err != nil {
 		slog.Error("assets_sign_failed", "err", err)
 		return ""
 	}
-	c.sasDay, c.sasQuery = today, q.Encode()
-	return c.sasQuery
+	c.sasQuery[path] = q.Encode()
+	return c.sasQuery[path]
 }
 
 // Start fetches the first delegation key and keeps it fresh until ctx ends.
@@ -130,7 +135,7 @@ func (c *Client) refreshKey(ctx context.Context) {
 		return
 	}
 	c.sign, c.signUntil = sign, expiry
-	c.sasQuery = "" // sign today's SAS again with the new key
+	c.sasQuery = nil // sign today's URLs again with the new key
 }
 
 // keyUsable: the caller holds c.mu.

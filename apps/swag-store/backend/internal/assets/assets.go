@@ -19,7 +19,8 @@
 //
 // The backend writes with its own Microsoft Entra identity (a managed
 // identity or an app registration) and signs read URLs with a user-delegation
-// key from that identity, so no SAS or account key is configured. A shared
+// key from that identity (one read SAS per photo, for that blob only), so no
+// SAS or account key is configured. A shared
 // account key is accepted only for the local emulator.
 package assets
 
@@ -100,7 +101,7 @@ type Client struct {
 	sign      signFunc
 	signUntil time.Time // zero: the key never expires (shared key)
 	sasDay    time.Time
-	sasQuery  string
+	sasQuery  map[string]string // today's SAS per photo path
 	keyErrLog time.Time
 }
 

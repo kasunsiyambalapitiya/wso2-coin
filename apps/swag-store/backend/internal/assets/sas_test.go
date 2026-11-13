@@ -70,7 +70,7 @@ func TestReadSASShape(t *testing.T) {
 		t.Fatalf("url = %s", u)
 	}
 	q := parsedQuery(t, u)
-	assertEq(t, q.Get("sr"), "c")
+	assertEq(t, q.Get("sr"), "b") // this blob only
 	assertEq(t, q.Get("sp"), "r")
 	assertEq(t, q.Get("spr"), "https,http")
 	assertEq(t, q.Get("st"), "2026-11-12T23:45:00Z")
@@ -80,6 +80,10 @@ func TestReadSASShape(t *testing.T) {
 	}
 	c.now = at("2026-11-13T00:00:01Z")
 	assertEq(t, *c.ReadURL(testPhoto), u) // the same all day
+	other := "products/0192f3c4-7d1e-7a40-9b2c-5e8f1a2b3c4d/back-0a1b2c3d.png"
+	if parsedQuery(t, *c.ReadURL(other)).Get("sig") == q.Get("sig") {
+		t.Fatal("two photos share a signature: a URL must read only its own blob")
+	}
 	c.now = at("2026-11-14T00:00:00Z")
 	if next := *c.ReadURL(testPhoto); next == u {
 		t.Fatal("the SAS must change at midnight")
